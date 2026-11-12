@@ -1,0 +1,13 @@
+# Secrets: Soulseek login, passwords and API keys
+.env
+seeker/dev.env
+
+# Your music and the apps' data (also when running from deploy/)
+music/
+downloads/
+import/
+seeker-data/
+slskd/
+/data/
+
+.DS_Store

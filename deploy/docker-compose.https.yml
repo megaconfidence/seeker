@@ -1,0 +1,41 @@
+# HTTPS for Seeker through Caddy, which gets a free Let's Encrypt certificate and renews it.
+# Use it on top of docker-compose.yml, from this folder:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+#
+# or put COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml in .env, so that every
+# docker compose command here uses both files.
+#
+# Set SEEKER_DOMAIN in .env, point the domain at your home IP address and forward ports 80 and
+# 443 to this server. Only Seeker goes behind Caddy; slskd's UI stays on your LAN.
+# Needs Docker Compose 2.24.4 or newer for !override (check with: docker compose version).
+
+services:
+  seeker:
+    # Replaces the public 7335 port: only Caddy and this machine can reach Seeker directly.
+    ports: !override
+      - "127.0.0.1:7335:7335"
+    environment:
+      # Caddy passes on the visitor's address, which the login rate limit needs.
+      - SEEKER_TRUST_PROXY=true
+
+  caddy:
+    image: caddy:2
+    depends_on:
+      seeker:
+        condition: service_healthy
+    environment:
+      - SEEKER_DOMAIN=${SEEKER_DOMAIN:?Set SEEKER_DOMAIN in .env to the domain name for Seeker}
+    ports:
+      - "80:80"         # certificate checks, and redirects to HTTPS
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data   # certificates and keys
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
