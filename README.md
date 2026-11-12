@@ -6,6 +6,24 @@ library, ready for Jellyfin or any other player. An AI assistant can do all of t
 
 ![Seeker's search page showing artists and albums for Jonathan Coulton](docs/screenshots/search.jpg)
 
+## Contents
+
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Install](#install)
+  - [If you already run slskd](#if-you-already-run-slskd)
+  - [Build from source](#build-from-source)
+- [Configuration](#configuration)
+- [How a download works](#how-a-download-works)
+- [Using Seeker](#using-seeker)
+- [MCP](#mcp)
+- [Updates](#updates)
+- [Remote access and HTTPS](#remote-access-and-https)
+- [Back up and restore](#back-up-and-restore)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+  - [Releases](#releases)
+
 ## Features
 
 - **Search and download.** Type `Artist - Album` and press Enter to see the best match, then Enter again to get it.
@@ -49,34 +67,88 @@ On a phone, in dark mode:
 
 The screenshots show freely licensed albums by Jonathan Coulton and Nine Inch Nails (Creative Commons).
 
-## Getting started
+## Install
 
-You need Docker with Compose, and a Soulseek account. Any unused username and password creates an account the first
-time slskd logs in.
+Seeker is published as a Docker image on
+[GitHub Packages](https://github.com/megaconfidence/seeker/pkgs/container/seeker). It's built for 64-bit x86 and ARM,
+so it also runs on most NAS boxes and on a Raspberry Pi with a 64-bit OS. Docker Compose runs it together with slskd.
 
-1. Get the code and create your settings file:
+You need Docker with Compose, and a Soulseek account: any unused username and password creates one the first time
+slskd logs in.
 
-   ```bash
-   git clone https://github.com/megaconfidence/seeker.git
-   cd seeker
-   cp .env.example .env
-   ```
-
-2. Fill in `.env`. At least: `SLSK_USERNAME`, `SLSK_PASSWORD`, `SEEKER_PASSWORD` and `SLSKD_API_KEY`
-   (make one with `openssl rand -hex 24`). Point `MUSIC_DIR` at your library.
-3. Start Seeker and slskd:
+1. Pull the image:
 
    ```bash
-   docker compose up -d --build
+   docker pull ghcr.io/megaconfidence/seeker:latest
    ```
 
-4. Open http://localhost:7335 and sign in with `SEEKER_PASSWORD`.
+2. Make a folder for Seeker, and download the compose file and the settings template into it:
 
-slskd's own interface is at http://localhost:5030. For better connections, forward TCP port 50300 on your router to
-this machine.
+   ```bash
+   mkdir seeker && cd seeker
+   curl -fsSLO https://raw.githubusercontent.com/megaconfidence/seeker/main/deploy/docker-compose.yml
+   curl -fsSL -o .env https://raw.githubusercontent.com/megaconfidence/seeker/main/.env.example
+   ```
+
+3. Fill in `.env`. At least: `SLSK_USERNAME`, `SLSK_PASSWORD`, `SEEKER_PASSWORD` and `SLSKD_API_KEY`
+   (make one with `openssl rand -hex 24`). Point `MUSIC_DIR` at your library. On Linux, set `PUID` and `PGID` to the
+   user that should own your music (`id -u` and `id -g`).
+4. On Linux, create the folders before the first start. Otherwise Docker creates them owned by root, and Seeker and
+   slskd can't write to them:
+
+   ```bash
+   mkdir -p music downloads import seeker-data slskd
+   sudo chown -R 1000:1000 music downloads import seeker-data slskd   # your PUID:PGID
+   ```
+
+5. Start Seeker and slskd:
+
+   ```bash
+   docker compose up -d
+   ```
+
+6. Open http://localhost:7335, or `http://<server>:7335` from another device, and sign in with `SEEKER_PASSWORD`.
+
+slskd's own interface is on port 5030. For better connections, forward TCP port 50300 on your router to this machine.
+Don't forward 5030 or 7335; to reach Seeker away from home, see [Remote access and HTTPS](#remote-access-and-https).
 
 Please share: everything in your music folder is shared on Soulseek (read-only), and users who share nothing are often
 refused.
+
+### If you already run slskd
+
+Start Seeker on its own and point it at your slskd. Replace the address, key, user and paths with yours:
+
+```bash
+docker run -d --name seeker --restart unless-stopped \
+  --user 1000:1000 \
+  -p 7335:7335 \
+  -e SEEKER_PASSWORD=choose-a-password \
+  -e SLSKD_URL=http://192.168.1.10:5030 \
+  -e SLSKD_API_KEY=your-slskd-api-key \
+  -v /path/to/seeker-data:/data \
+  -v /path/to/slskd/downloads:/downloads \
+  -v /path/to/music:/music \
+  -v /path/to/import:/import \
+  ghcr.io/megaconfidence/seeker:latest
+```
+
+- **API key.** Seeker needs a key that can make changes. A key set with slskd's `SLSKD_API_KEY` variable can; keys in
+  `slskd.yml` are read-only unless you add `role: readwrite`.
+- **Downloads.** `/downloads` must be slskd's download folder, because Seeker picks finished downloads up from there.
+  Run Seeker as the same user as slskd (`--user`), so it can move them into your library.
+- **Sharing.** To share new music back on Soulseek, add your music folder to slskd's shared folders.
+
+### Build from source
+
+To build the image yourself, clone the repository and use the compose file at its root:
+
+```bash
+git clone https://github.com/megaconfidence/seeker.git
+cd seeker
+cp .env.example .env   # fill it in as in step 3
+docker compose up -d --build
+```
 
 ## Configuration
 
@@ -94,6 +166,7 @@ These go in `.env`:
 | `ACOUSTID_API_KEY` | Optional: fingerprint every download | |
 | `PUID`, `PGID` | User and group that own the files | `1000` |
 | `TZ` | Time zone | `UTC` |
+| `SEEKER_IMAGE` | The Seeker image to run | `ghcr.io/megaconfidence/seeker:latest` |
 
 Everything else is in **Settings** in the app:
 
@@ -174,49 +247,30 @@ The assistant can read the app's state as well as change it:
 Tools that delete things are marked, so assistants ask before using them. API keys are never shown, only whether
 they're set.
 
-## Run it on a home server
+## Updates
 
-The `deploy` folder runs the published image, `ghcr.io/megaconfidence/seeker`, instead of building one, so the server
-only needs Docker with Compose. The image is built for 64-bit x86 and ARM, so it runs on most NAS boxes and on a
-Raspberry Pi with a 64-bit OS.
+Every change to `main`, apart from documentation, is published as a new `latest` image once the tests pass. To update,
+run this in your Seeker folder:
 
-### How new versions are published
+```bash
+docker compose pull
+docker compose up -d
+```
 
-The workflow in `.github/workflows/docker.yml` runs on every push to `main`. It checks the types and runs the tests,
-and only if they pass builds the image and publishes it:
+If you started Seeker with `docker run`, pull the image, remove the container (`docker rm -f seeker`) and run the same
+command again.
 
-- `latest` follows `main`
-- `sha-<commit>` marks every build
-- a version tag such as `v0.2.0` publishes `0.2.0` and `0.2`
+To update automatically, run [Watchtower](https://github.com/nicholas-fedor/watchtower) on the server. It replaces the
+Seeker container when a new image is published. The compose file labels Seeker with
+`com.centurylinklabs.watchtower.enable=true`, so this also works when Watchtower only updates containers that opt in.
+Watchtower checks once a day by default; set `WATCHTOWER_POLL_INTERVAL=300` on it to check every 5 minutes. (The
+original `containrrr/watchtower` is no longer maintained; `nickfedor/watchtower` is a drop-in replacement.)
 
-Pull requests are tested and built, but nothing is published. A fork publishes to `ghcr.io/<its-owner>/seeker`; set
-`SEEKER_IMAGE` to use it. New packages start out private, so make yours public under **Packages** → **seeker** →
-**Package settings**.
+**Settings → Account** shows the build you're running (`build 1a2b3c4`, the commit's short id), and so does
+`get_status` over MCP. To stay on one build, set `SEEKER_IMAGE` in `.env` to its tag, such as
+`ghcr.io/megaconfidence/seeker:sha-1a2b3c4`.
 
-### Set up the server
-
-1. Get the `deploy` folder onto the server, and create `.env` in it:
-
-   ```bash
-   git clone https://github.com/megaconfidence/seeker.git
-   cd seeker/deploy
-   cp ../.env.example .env
-   ```
-
-2. Fill in `.env` as above (`SEEKER_IMAGE` already points at the published image). Set `PUID` and `PGID` to the user
-   that should own your music (`id -u` and `id -g`). Paths are relative to the `deploy` folder.
-3. Create the folders before the first start. Otherwise Docker creates them owned by root, and Seeker and slskd can't
-   write to them:
-
-   ```bash
-   mkdir -p music downloads import seeker-data slskd
-   sudo chown -R 1000:1000 music downloads import seeker-data slskd   # your PUID:PGID
-   ```
-
-4. Start everything with `docker compose up -d`. Seeker is at `http://<server>:7335`, slskd at `http://<server>:5030`.
-5. Forward TCP port 50300 on your router to the server. Don't forward 5030 or 7335.
-
-### Remote access and HTTPS
+## Remote access and HTTPS
 
 [Tailscale](https://tailscale.com) is the simplest private option. Install it on the server and your devices, and
 open Seeker at the server's Tailscale name. `tailscale serve --bg 7335` on the server adds HTTPS.
@@ -224,31 +278,21 @@ open Seeker at the server's Tailscale name. `tailscale serve --bg 7335` on the s
 To use your own domain, `docker-compose.https.yml` puts Caddy in front of Seeker with a free Let's Encrypt
 certificate:
 
-1. Point the domain at your home IP address, and forward ports 80 and 443 to the server.
-2. Add `SEEKER_DOMAIN=music.example.com` and `COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml` to `.env`.
-3. Run `docker compose up -d`.
+1. Download it and its Caddyfile into your Seeker folder:
+
+   ```bash
+   curl -fsSLO https://raw.githubusercontent.com/megaconfidence/seeker/main/deploy/docker-compose.https.yml
+   curl -fsSLO https://raw.githubusercontent.com/megaconfidence/seeker/main/deploy/Caddyfile
+   ```
+
+2. Point the domain at your home IP address, and forward ports 80 and 443 to the server.
+3. Add `SEEKER_DOMAIN=music.example.com` and `COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml` to `.env`.
+4. Run `docker compose up -d`.
 
 This needs Docker Compose 2.24.4 or newer. If you use another reverse proxy, set `SEEKER_TRUST_PROXY=true` for Seeker,
 but only if Seeker can't be reached without going through the proxy.
 
-### Updates
-
-With [Watchtower](https://github.com/nicholas-fedor/watchtower) on the server, every push to `main` deploys itself:
-the workflow publishes a new image, and Watchtower replaces the Seeker container at its next check. The deploy
-compose file labels Seeker with `com.centurylinklabs.watchtower.enable=true`, so this also works when Watchtower only
-updates containers that opt in. Watchtower checks once a day by default; set `WATCHTOWER_POLL_INTERVAL=300` on it to
-check every 5 minutes. (The original `containrrr/watchtower` is no longer maintained; `nickfedor/watchtower` is a
-drop-in replacement.)
-
-**Settings → Account** shows the build you're running (`build 1a2b3c4`, the commit's short id), and so does
-`get_status` over MCP. Without Watchtower, update by hand:
-
-```bash
-docker compose pull
-docker compose up -d
-```
-
-### Back up and restore
+## Back up and restore
 
 Seeker copies its database (settings, tokens, downloads and watchlist) to `seeker-data/backups` every day and keeps the
 last 7. Back up that folder, your music, and `.env`. To restore, stop Seeker, put a backup in place of
@@ -266,7 +310,7 @@ docker compose up -d
 - **"Not logged in to Soulseek"**: your account is probably signed in on another app; Soulseek allows one session per
   account. Close the other app, then press **Reconnect** in **Settings**.
 - **Downloads never start, or users refuse them**: share some music, and forward port 50300 to slskd.
-- **Permission errors on a Linux server**: the folders must belong to `PUID:PGID`; see step 3 of the server setup.
+- **Permission errors on a Linux server**: the folders must belong to `PUID:PGID`; see step 4 of [Install](#install).
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.
@@ -288,7 +332,7 @@ npm run typecheck
 
 ```text
 docker-compose.yml     Seeker and slskd, built locally
-deploy/                Home server setup with the published image, and HTTPS
+deploy/                Compose files for the published image (the install steps download them), and HTTPS
 seeker/server/         API, download engine, MCP server
 seeker/web/            Web app
 seeker/shared/         Types shared by the server and the web app
@@ -296,5 +340,20 @@ seeker/test/           Tests and fakes
 ```
 
 [AGENTS.md](AGENTS.md) explains the code in more detail for coding agents.
+
+### Releases
+
+`.github/workflows/docker.yml` checks the types and runs the tests on every push to `main` and every pull request.
+Only if they pass does it build the image, for x86 and ARM. Pushes to `main` publish it:
+
+- `latest` follows `main`
+- `sha-<commit>` marks every build
+- a version tag such as `v0.2.0` publishes `0.2.0` and `0.2`
+
+Pull requests are built but never published. Pushes and pull requests that only change documentation (Markdown files
+and `docs/`) skip the workflow, so they don't publish an image. A fork publishes to `ghcr.io/<its-owner>/seeker`; set
+`SEEKER_IMAGE` to use it.
+
+---
 
 Only download music you have the right to.

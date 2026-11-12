@@ -1,11 +1,11 @@
-# slskd + Seeker for a home server, using the published Seeker image (nothing to build)
+# slskd + Seeker, using the published Seeker image (nothing to build). See "Install" in the README.
 #
 #   Seeker -> http://<server>:7335   (search and download, library, player)
 #   slskd  -> http://<server>:5030   (Soulseek connection, shares, raw transfers)
 #
-# Run docker compose from this folder, with a .env next to this file (copy ../.env.example).
-# Relative paths, here and in .env, are relative to this folder.
-# For HTTPS, add docker-compose.https.yml (see "Run it on a home server" in the README).
+# Run docker compose from the folder this file is in, with a .env next to it (from .env.example).
+# Relative paths, here and in .env, are relative to that folder.
+# For HTTPS, add docker-compose.https.yml (see "Remote access and HTTPS" in the README).
 
 name: seeker
 

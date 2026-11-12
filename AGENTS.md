@@ -13,7 +13,7 @@ and `seeker` (this code).
 
 ```text
 docker-compose.yml          Local stack: slskd + seeker built from ./seeker
-deploy/                     Home server stack using the published image; HTTPS override and Caddyfile
+deploy/                     Compose stack using the published image (the README's install); HTTPS override and Caddyfile
 .github/workflows/          CI: typecheck, tests, multi-arch image to GHCR
 docs/screenshots/           README images
 seeker/
@@ -62,7 +62,9 @@ Before you finish a change, `npm run typecheck` and `npm test` must pass.
 The repository is public at `github.com/megaconfidence/seeker`. Every push to `main` runs
 `.github/workflows/docker.yml`: typecheck and tests, then a multi-arch image published as
 `ghcr.io/megaconfidence/seeker:latest` and `:sha-<commit>`. The owner's home server runs Watchtower, which replaces
-the running Seeker container with the new image on its next check.
+the running Seeker container with the new image on its next check. Pushes that only change Markdown files or `docs/`
+skip the workflow (`paths-ignore`): they publish and deploy nothing, and the server keeps reporting the last commit
+that built an image.
 
 - **A push to `main` is a production deploy.** Don't push work in progress there; use a branch and a pull request
   (pull requests are tested and built, never published). Only push or tag when the owner asks.
@@ -70,6 +72,9 @@ the running Seeker container with the new image on its next check.
   together.
 - Images carry their commit (`SEEKER_COMMIT` build argument). Settings → Account and MCP `get_status` show it, which
   is how to check what the server runs.
+- The README's install steps download `deploy/docker-compose.yml`, `deploy/docker-compose.https.yml`,
+  `deploy/Caddyfile` and `.env.example` from `main` by URL, into one folder. Keep those paths, and keep the files
+  working on their own, outside the repository.
 - Never commit secrets: this repository is public.
 
 ## Rules
