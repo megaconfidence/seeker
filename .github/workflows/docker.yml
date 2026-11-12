@@ -1,13 +1,17 @@
 # Tests Seeker, then builds its image for linux/amd64 and linux/arm64 and publishes it as
 # ghcr.io/<owner>/seeker. Pull requests are tested and built, but nothing is published.
+# Changes that only touch documentation don't run it, so they don't publish an image that
+# Watchtower would then deploy. GitHub ignores path filters for tag pushes, so tags always build.
 name: Docker image
 
 on:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
     branches: [main]
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 
 permissions:
