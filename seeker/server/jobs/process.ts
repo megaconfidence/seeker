@@ -6,7 +6,7 @@ import { config } from '../config.ts'
 import { all, exec } from '../db.ts'
 import { describeIdentity, fileErrorMessage, folderProblem, isPermissionError } from '../folders.ts'
 import { scheduleJellyfinRefresh } from '../jellyfin.ts'
-import { AUDIO_EXTENSIONS, scanFiles, scanLibrary } from '../library/scan.ts'
+import { AUDIO_EXTENSIONS, musicFolderProblem, scanFiles, scanLibrary } from '../library/scan.ts'
 import { logger } from '../log.ts'
 import { normalize, stripExtras } from '../match/normalize.ts'
 import { findRelease } from '../metadata/musicbrainz.ts'
@@ -267,6 +267,15 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
   const failedTracks: number[] = []
   const imported: string[] = []
   let touchedLibrary = false
+
+  // Filing into a share that isn't mounted would put music where nobody looks for it (or inside
+  // the container), so nothing moves until the folder is back.
+  const musicProblem = rows.length ? await musicFolderProblem() : null
+  if (musicProblem) {
+    for (const row of rows) store.patchFile(row.id, { state: 'failed', error: musicProblem })
+    store.logJob(jobId, 'error', `${musicProblem} Nothing was moved; retry once the folder is back.`)
+    return { failedTracks }
+  }
 
   if (target && rows.some((row) => row.track_index !== null)) {
     try {

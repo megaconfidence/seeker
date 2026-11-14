@@ -2,12 +2,15 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { parseFile } from 'music-metadata'
+import type { LibraryProblem, LibraryStatus, ScanResult } from '../../shared/types.ts'
 import { config } from '../config.ts'
 import { all, exec, get, transaction } from '../db.ts'
 import { emit } from '../events.ts'
+import { fsReason } from '../folders.ts'
 import { logger } from '../log.ts'
 import { normalize, stripExtras } from '../match/normalize.ts'
 import { noteLibraryChange } from '../shares.ts'
+import { errorMessage } from '../util.ts'
 import { rebuildOwnedIndex } from './owned.ts'
 
 const log = logger('library')
@@ -15,13 +18,13 @@ const log = logger('library')
 export const AUDIO_EXTENSIONS = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.aiff', '.aif', '.wv', '.ape', '.alac'])
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'albumart']
 const COVER_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
+// How soon to look again when the music folder seemed unmounted.
+const RETRY_MS = 10 * 60_000
 
 let scanning = false
-let pending = false
-
-export function isScanning() {
-  return scanning
-}
+let pending: { force: boolean } | null = null
+let problem: LibraryProblem | null = null
+let retryTimer: ReturnType<typeof setTimeout> | undefined
 
 export function libraryCounts() {
   const albums = get<{ n: number }>('SELECT COUNT(*) AS n FROM lib_albums')?.n ?? 0
@@ -29,8 +32,30 @@ export function libraryCounts() {
   return { albums, tracks }
 }
 
+export function libraryStatus(): LibraryStatus {
+  return { ...libraryCounts(), scanning, problem }
+}
+
 function announce() {
-  emit({ type: 'library', ...libraryCounts(), scanning })
+  emit({ type: 'library', ...libraryStatus() })
+}
+
+const tracks = (n: number) => `${n.toLocaleString('en')} ${n === 1 ? 'track' : 'tracks'}`
+const unmountedHint = 'If it’s a network share, check that it’s mounted.'
+
+// Why the music folder can't be trusted right now, or null. A missing or unreadable folder, or an
+// empty one while the library has tracks, usually means a network share that isn't mounted rather
+// than an empty library.
+export async function musicFolderProblem(): Promise<string | null> {
+  const dir = config.musicDir
+  try {
+    if (!(await fs.stat(dir)).isDirectory()) return `The music folder, ${dir}, isn’t a folder.`
+    for await (const entry of await fs.opendir(dir)) if (!entry.name.startsWith('.')) return null
+  } catch (error) {
+    return `Seeker can’t read the music folder, ${dir} (${fsReason(error)}). ${unmountedHint}`
+  }
+  const known = libraryCounts().tracks
+  return known > 0 ? `The music folder, ${dir}, is empty, but the library has ${tracks(known)}. ${unmountedHint}` : null
 }
 
 export function albumIdFor(albumArtist: string, album: string): string {
@@ -40,18 +65,29 @@ export function albumIdFor(albumArtist: string, album: string): string {
     .slice(0, 16)
 }
 
-async function walk(dir: string, out: { file: string; mtime: number; size: number }[]) {
+interface Entry {
+  file: string
+  mtime: number
+  size: number
+}
+
+// Folders that can't be read are collected rather than skipped, so their tracks aren't taken as
+// deleted. Only failing to read the music folder itself is an error.
+async function walk(dir: string, out: Entry[], unreadable: string[], root = false) {
   let entries: import('node:fs').Dirent[]
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
-  } catch {
+  } catch (error) {
+    if (root) throw error
+    // A folder that vanished during the scan is simply gone; anything else may come back.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') unreadable.push(dir)
     return
   }
   for (const entry of entries) {
     if (entry.name.startsWith('.')) continue
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      await walk(full, out)
+      await walk(full, out, unreadable)
     } else if (entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
       try {
         const stat = await fs.stat(full)
@@ -262,56 +298,113 @@ async function rebuildAlbums(albumIds?: Set<string>) {
   })
 }
 
-export async function scanLibrary(): Promise<void> {
+const result = (outcome: ScanResult['outcome'], message: string, counts: Partial<ScanResult> = {}): ScanResult => ({
+  outcome,
+  message,
+  files: 0,
+  updated: 0,
+  removed: 0,
+  ...counts,
+})
+
+// `force` removes tracks whose files are gone even when that's most of the library, once the user
+// has confirmed they removed them. A missing or unreadable music folder is never scanned.
+export async function scanLibrary(options: { force?: boolean } = {}): Promise<ScanResult> {
   if (scanning) {
-    pending = true
-    return
+    pending = { force: !!options.force || !!pending?.force }
+    return result('queued', 'A library scan is already running; Seeker scans again when it finishes.')
   }
   scanning = true
   announce()
-  const started = Date.now()
   try {
-    await fs.mkdir(config.musicDir, { recursive: true })
-    const files: { file: string; mtime: number; size: number }[] = []
-    await walk(config.musicDir, files)
-    const known = new Map(
-      all<{ path: string; mtime: number; size: number }>('SELECT path, mtime, size FROM lib_tracks').map((row) => [row.path, row]),
-    )
-    const seen = new Set<string>()
-    let changed = 0
-    const now = Date.now()
-    for (const entry of files) {
-      seen.add(entry.file)
-      const existing = known.get(entry.file)
-      if (existing && existing.mtime === entry.mtime && existing.size === entry.size) continue
-      try {
-        upsertTrack(await readTrack(entry.file, entry.mtime, entry.size), now)
-        changed++
-      } catch (error) {
-        log.warn(`Could not read ${entry.file}`, error)
-      }
-    }
-    let removed = 0
-    for (const file of known.keys()) {
-      if (!seen.has(file)) {
-        exec('DELETE FROM lib_tracks WHERE path = ?', [file])
-        removed++
-      }
-    }
-    await rebuildAlbums()
-    rebuildOwnedIndex()
-    if (changed || removed) noteLibraryChange()
-    log.info(`Library scan: ${files.length} files, ${changed} updated, ${removed} removed in ${Date.now() - started} ms`)
+    return await scan(!!options.force)
   } catch (error) {
     log.error('Library scan failed', error)
+    return result('refused', `The library scan failed: ${errorMessage(error)}`)
   } finally {
     scanning = false
     announce()
     if (pending) {
-      pending = false
-      void scanLibrary()
+      const next = pending
+      pending = null
+      void scanLibrary(next)
     }
   }
+}
+
+function refuse(message: string, missing: number, canForce: boolean, retry: boolean): ScanResult {
+  const full = `${message} Seeker kept the library as it was.`
+  // Retries while a share stays unmounted would repeat the same warning every few minutes.
+  if (problem?.message === full) log.debug(full)
+  else log.warn(full)
+  problem = { message: full, missing, canForce }
+  if (retry) {
+    // A share that isn't mounted usually comes back by itself, so look again before the next 6-hourly scan.
+    retryTimer = setTimeout(() => void scanLibrary(), RETRY_MS)
+    retryTimer.unref()
+  }
+  return result('refused', full)
+}
+
+async function scan(force: boolean): Promise<ScanResult> {
+  const started = Date.now()
+  const dir = config.musicDir
+  clearTimeout(retryTimer)
+  const known = new Map(
+    all<{ path: string; mtime: number; size: number }>('SELECT path, mtime, size FROM lib_tracks').map((row) => [row.path, row]),
+  )
+  const files: Entry[] = []
+  const unreadable: string[] = []
+  try {
+    // Never created here: creating it would hide a share that isn't mounted.
+    if (!(await fs.stat(dir)).isDirectory()) throw Object.assign(new Error(`${dir} isn’t a folder`), { code: 'ENOTDIR' })
+    await walk(dir, files, unreadable, true)
+  } catch (error) {
+    return refuse(`Seeker can’t read the music folder, ${dir} (${fsReason(error)}). ${unmountedHint}`, known.size, false, true)
+  }
+  if (files.length === 0 && known.size > 0 && !force) {
+    return refuse(`The music folder, ${dir}, is empty, but the library has ${tracks(known.size)}. ${unmountedHint}`, known.size, true, true)
+  }
+
+  const seen = new Set(files.map((entry) => entry.file))
+  const inUnreadable = (file: string) => unreadable.some((folder) => file.startsWith(folder + path.sep))
+  const gone = [...known.keys()].filter((file) => !seen.has(file) && !inUnreadable(file))
+  const limit = Math.max(100, Math.floor(known.size / 2))
+  if (gone.length > limit && !force) {
+    return refuse(
+      `${gone.length.toLocaleString('en')} of the library’s ${tracks(known.size)} are missing from the music folder, ${dir}. That’s more than Seeker removes without asking, in case the folder isn’t all there.`,
+      gone.length,
+      true,
+      false,
+    )
+  }
+
+  let updated = 0
+  const now = Date.now()
+  for (const entry of files) {
+    const existing = known.get(entry.file)
+    if (existing && existing.mtime === entry.mtime && existing.size === entry.size) continue
+    try {
+      upsertTrack(await readTrack(entry.file, entry.mtime, entry.size), now)
+      updated++
+    } catch (error) {
+      log.warn(`Could not read ${entry.file}`, error)
+    }
+  }
+  transaction(() => {
+    for (const file of gone) exec('DELETE FROM lib_tracks WHERE path = ?', [file])
+  })
+  await rebuildAlbums()
+  rebuildOwnedIndex()
+  if (updated || gone.length) noteLibraryChange()
+  if (unreadable.length) {
+    const shown = unreadable.slice(0, 3).join(', ') + (unreadable.length > 3 ? ', …' : '')
+    log.warn(`Seeker couldn’t read ${unreadable.length} ${unreadable.length === 1 ? 'folder' : 'folders'} in the music folder, so it kept their tracks: ${shown}. Check their permissions.`)
+  }
+  problem = null
+  const message = `Library scan: ${files.length} files, ${updated} updated, ${gone.length} removed${force ? ' (forced)' : ''} in ${Date.now() - started} ms`
+  log.info(message)
+  return result('done', message, { files: files.length, updated, removed: gone.length })
 }
 
 // Index specific files right after an import, without walking the whole library.

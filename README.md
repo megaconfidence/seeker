@@ -199,7 +199,10 @@ downloading it, or use **Soulseek files** to pick an exact copy yourself. If an 
 MusicBrainz from the bottom of the results.
 
 **Library.** Open an album in your library to play it. The **⋯** menu can find a better-quality copy, match the album
-to the catalog (fixing its tags, file names and cover), or delete it.
+to the catalog (fixing its tags, file names and cover), or delete it. Seeker rescans the music folder at startup and
+every 6 hours, and when you press **Rescan**. If the folder is missing, unreadable or empty, or more than half the
+library seems gone, it leaves the library as it is and explains why at the top of the Library page: a network share
+that isn't mounted looks just like that. If you did remove the music, press **Remove missing tracks**.
 
 **Importing.** Put album folders in the import folder (`/import`) and open **Library → Import music**. For each folder,
 Seeker suggests matching albums and shows how many files fit. Choose one to tag the files and file them in your
@@ -299,6 +302,9 @@ rm -f /path/to/seeker-data/seeker.db-wal /path/to/seeker-data/seeker.db-shm
   **Settings → Soulseek** and let slskd rescan on a schedule with `SLSKD_SHARE_CACHE_RETENTION` (in minutes; see
   [share cache](https://github.com/slskd/slskd/blob/master/docs/config.md#cache) in slskd's docs). New music is then shared
   after slskd's next rescan, or when you press **Rescan**. Downloads that start while slskd is busy wait for it.
+- **The library stopped updating, or downloads fail with "the music folder … is empty"**: Seeker can't see your
+  music, usually because a network share isn't mounted, so it keeps the library and doesn't file anything until the
+  folder is back. It looks again every 10 minutes, or press **Rescan** on the Library page.
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.

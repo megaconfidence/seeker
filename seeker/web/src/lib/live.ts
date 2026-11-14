@@ -56,7 +56,9 @@ export function useServerEvents(enabled: boolean) {
           break
         case 'library':
           client.setQueryData<AppStatus>(['status'], (status) =>
-            status ? { ...status, library: { albums: event.albums, tracks: event.tracks, scanning: event.scanning } } : status,
+            status
+              ? { ...status, library: { albums: event.albums, tracks: event.tracks, scanning: event.scanning, problem: event.problem } }
+              : status,
           )
           if (!event.scanning) refreshLibraryViews(client)
           break

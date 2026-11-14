@@ -368,13 +368,37 @@ export interface ShareRescanStatus {
   running: boolean
 }
 
+// Why the last library scan left the library as it was (see server/library/scan.ts).
+export interface LibraryProblem {
+  message: string
+  // Tracks kept in the library although their files weren't found.
+  missing: number
+  // The music folder is there, so a forced scan would remove them.
+  canForce: boolean
+}
+
+export interface ScanResult {
+  outcome: 'done' | 'refused' | 'queued'
+  message: string
+  files: number
+  updated: number
+  removed: number
+}
+
+export interface LibraryStatus {
+  albums: number
+  tracks: number
+  scanning: boolean
+  problem: LibraryProblem | null
+}
+
 export interface AppStatus {
   version: string
   commit: string | null
   slskd: SlskdStatus
   shareRescan: ShareRescanStatus
   jobs: { active: number; wanted: number; failed: number }
-  library: { albums: number; tracks: number; scanning: boolean }
+  library: LibraryStatus
 }
 
 export type QualityFormat = 'flac' | 'alac' | 'wav' | 'mp3' | 'aac' | 'ogg' | 'opus'
@@ -426,5 +450,5 @@ export type ServerEvent =
   | { type: 'job'; job: Job }
   | { type: 'job-removed'; id: string }
   | { type: 'status'; status: AppStatus }
-  | { type: 'library'; albums: number; tracks: number; scanning: boolean }
+  | ({ type: 'library' } & LibraryStatus)
   | { type: 'watchlist' }

@@ -752,11 +752,21 @@ function buildServer(): McpServer {
 
   server.registerTool(
     'rescan_library',
-    { title: 'Rescan the library', description: 'Re-read the music folder, e.g. after changing files outside Seeker.', inputSchema: {} },
-    async () =>
+    {
+      title: 'Rescan the library',
+      description:
+        'Re-read the music folder, e.g. after changing files outside Seeker. If the folder is missing, unreadable or empty, or more than half the library seems gone, Seeker keeps the library as it is and says why: an unmounted network share looks like that. get_status shows that as library.problem.',
+      inputSchema: {
+        force: z
+          .boolean()
+          .optional()
+          .describe('Remove tracks whose files are gone even when the folder is empty or most of the library is missing. Only after the user confirms they removed them.'),
+      },
+    },
+    async ({ force }) =>
       guard(async () => {
-        await scanLibrary()
-        return ok(appStatus().library, 'Library rescanned.')
+        const scan = await scanLibrary({ force })
+        return ok({ ...appStatus().library, scan }, scan.message)
       }),
   )
 

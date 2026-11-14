@@ -2,7 +2,7 @@ import type { AppStatus, SlskdStatus } from '../shared/types.ts'
 import { config } from './config.ts'
 import { emit } from './events.ts'
 import { statusCounts } from './jobs/store.ts'
-import { isScanning, libraryCounts } from './library/scan.ts'
+import { libraryCounts, libraryStatus } from './library/scan.ts'
 import { logger } from './log.ts'
 import { noteLibraryChange, noteSlskdShares, onShareRescanChange, shareRescanStatus } from './shares.ts'
 import { slskd } from './soulseek/slskd.ts'
@@ -47,7 +47,7 @@ export function appStatus(): AppStatus {
     slskd: current,
     shareRescan: shareRescanStatus(),
     jobs: statusCounts(),
-    library: { ...libraryCounts(), scanning: isScanning() },
+    library: libraryStatus(),
   }
 }
 

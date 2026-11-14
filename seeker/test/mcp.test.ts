@@ -164,6 +164,14 @@ test('settings: read with keys masked, change one field, reject bad values', asy
   assert.deepEqual(shares.data.shares, { autoRescan: false, quietMinutes: 30 })
 })
 
+test('rescan_library says what the scan did, and whether it left the library alone', async () => {
+  const result = await call('rescan_library')
+  assert.equal(result.isError, false, result.text)
+  assert.equal(result.data.scan.outcome, 'done')
+  assert.equal(result.data.problem, null)
+  assert.equal((await call('get_status')).data.library.problem, null)
+})
+
 test('rescan_shares asks slskd to rescan right away', async () => {
   const before = slskd.shareRescans
   const result = await call('rescan_shares')

@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { FolderInput, Library as LibraryIcon, Play, RefreshCw, Search, X } from 'lucide-react'
+import { FolderInput, Library as LibraryIcon, Play, RefreshCw, Search, TriangleAlert, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import type { LibraryAlbum, LibraryArtist, LibraryTrack } from '../../../shared/types.ts'
@@ -7,6 +7,7 @@ import { Cover } from '../components/cover.tsx'
 import { AlbumGridSkeleton, Skeleton } from '../components/skeleton.tsx'
 import { Button, Empty, PageHeader, Select, Tabs } from '../components/ui.tsx'
 import { api } from '../lib/api.ts'
+import { useConfirm } from '../lib/confirm.tsx'
 import { plural } from '../lib/format.ts'
 import { useStatus } from '../lib/live.ts'
 import { coverUrl, fromLibrary, usePlayer } from '../lib/player.tsx'
@@ -61,7 +62,19 @@ export function LibraryPage() {
     queryFn: () => api.get<LibraryArtist[]>('/library/artists'),
     enabled: tab === 'artists',
   })
-  const rescan = useMutation({ mutationFn: () => api.post('/library/scan') })
+  const rescan = useMutation({ mutationFn: (force: boolean) => api.post('/library/scan', { force }) })
+  const confirm = useConfirm()
+  const problem = status?.library.problem ?? null
+
+  const removeMissing = async (missing: number) => {
+    const ok = await confirm({
+      title: `Remove ${plural(missing, 'missing track')} from the library?`,
+      description: 'Only do this if you removed the music yourself. Seeker forgets tracks whose files aren’t in the music folder; nothing on disk changes.',
+      confirmLabel: 'Remove from library',
+      tone: 'danger',
+    })
+    if (ok) rescan.mutate(true)
+  }
 
   const shownAlbums = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -92,7 +105,7 @@ export function LibraryPage() {
         }
         actions={
           <>
-            <Button size="sm" variant="ghost" icon={<RefreshCw className={scanning ? 'size-3.5 animate-spin' : 'size-3.5'} />} disabled={scanning} onClick={() => rescan.mutate()}>
+            <Button size="sm" variant="ghost" icon={<RefreshCw className={scanning ? 'size-3.5 animate-spin' : 'size-3.5'} />} disabled={scanning} onClick={() => rescan.mutate(false)}>
               {scanning ? 'Scanning' : 'Rescan'}
             </Button>
             <Link to="/import">
@@ -103,6 +116,18 @@ export function LibraryPage() {
           </>
         }
       />
+
+      {problem && (
+        <div className="mb-6 flex flex-col gap-3 rounded-lg border border-line bg-panel px-4 py-3 sm:flex-row sm:items-center">
+          <TriangleAlert className="size-4 shrink-0 text-warn" />
+          <p className="min-w-0 flex-1 text-[13px] text-muted">{problem.message}</p>
+          {problem.canForce && (
+            <Button size="sm" variant="secondary" disabled={scanning} onClick={() => void removeMissing(problem.missing)}>
+              Remove missing tracks
+            </Button>
+          )}
+        </div>
+      )}
 
       <div className="mb-6 flex flex-wrap items-center gap-3">
         {!artist && (

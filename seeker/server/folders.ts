@@ -59,7 +59,8 @@ export function describeIdentity(who: Identity = identity()): string {
 
 const code = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code
 
-function reason(error: unknown): string {
+// A file system error in a few words, for messages like "Seeker can't read /music (permission denied)".
+export function fsReason(error: unknown): string {
   switch (code(error)) {
     case 'EACCES':
     case 'EPERM':
@@ -82,7 +83,7 @@ export function folderProblem(dir: string): string | null {
     fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK)
     return null
   } catch (error) {
-    return reason(error)
+    return fsReason(error)
   }
 }
 
@@ -91,7 +92,7 @@ function databaseProblem(dir: string): string | null {
     try {
       fs.accessSync(path.join(dir, name), fs.constants.R_OK | fs.constants.W_OK)
     } catch (error) {
-      if (code(error) !== 'ENOENT') return `${reason(error)} for ${name}`
+      if (code(error) !== 'ENOENT') return `${fsReason(error)} for ${name}`
     }
   }
   return null
@@ -161,7 +162,7 @@ export function folderProblems(): Record<Folder, string | null> {
   const problems = {} as Record<Folder, string | null>
   for (const folder of Object.keys(FOLDERS) as Folder[]) {
     const problem = folderProblem(FOLDERS[folder].dir())
-    problems[folder] = problem && !(folder === 'import' && problem === reason({ code: 'ENOENT' })) ? folderMessage(folder, problem) : null
+    problems[folder] = problem && !(folder === 'import' && problem === fsReason({ code: 'ENOENT' })) ? folderMessage(folder, problem) : null
   }
   return problems
 }

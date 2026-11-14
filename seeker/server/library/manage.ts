@@ -12,7 +12,7 @@ import { toCandidate } from '../soulseek/files.ts'
 import { noteLibraryChange } from '../shares.ts'
 import { qualityOf } from '../soulseek/quality.ts'
 import { rebuildOwnedIndex } from './owned.ts'
-import { AUDIO_EXTENSIONS, libraryCounts, scanLibrary } from './scan.ts'
+import { AUDIO_EXTENSIONS, libraryStatus, scanLibrary } from './scan.ts'
 
 const IMAGE = /\.(jpe?g|png|webp|gif)$/i
 
@@ -43,7 +43,7 @@ function changed() {
   rebuildOwnedIndex()
   noteLibraryChange()
   scheduleJellyfinRefresh()
-  emit({ type: 'library', ...libraryCounts(), scanning: false })
+  emit({ type: 'library', ...libraryStatus() })
 }
 
 export async function deleteLibraryAlbum(id: string): Promise<number> {

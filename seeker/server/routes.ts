@@ -282,8 +282,9 @@ export function apiRoutes() {
   api.get('/library/artists', (c) => c.json(listArtists()))
   api.get('/library/tracks', (c) => c.json(searchTracks(c.req.query('q') ?? '')))
   api.get('/library/tracks/:id/stream', (c) => streamTrack(idParam(c), c.req.header('range')))
-  api.post('/library/scan', (c) => {
-    void scanLibrary()
+  api.post('/library/scan', async (c) => {
+    const body = await c.req.json<{ force?: unknown }>().catch(() => ({ force: false }))
+    void scanLibrary({ force: body.force === true })
     return c.json({ ok: true })
   })
   api.delete('/library/albums/:id', async (c) => c.json({ deleted: await deleteLibraryAlbum(c.req.param('id')) }))

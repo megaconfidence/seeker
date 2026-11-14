@@ -157,6 +157,11 @@ reporting the last commit that built an image.
   owned by the user isn't writable for container user 1000. The entrypoint fixes `/data` when the container starts as
   root (`PUID`/`PGID`); with `--user` it can't. `db.ts` calls `ensureDataDir()` before opening SQLite, so a data folder
   Seeker can't write to stops it with the ids and the `chown` to run, never a raw `SQLITE_CANTOPEN`.
+- A scan that can't see the music folder must never empty the library index (a downed NFS mount once would have).
+  `scanLibrary()` refuses when the folder is missing, unreadable, or empty while the index has tracks, or when more
+  than half the tracks (and at least 100) would go, unless `force` is passed; unreadable subfolders keep their rows.
+  The refusal is `library.problem` in the status. Never `mkdir` the music folder: that hides a missing mount, and
+  `processJob()` refuses to file while `musicFolderProblem()` reports one.
 - Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,
   `tagForLibrary()` in `jobs/process.ts` tags a copy if it can remove the original, and otherwise fails the file.
 
@@ -170,6 +175,7 @@ reporting the last commit that built an image.
 - `test/mcp.test.ts`: the MCP server through the official client, with no socket. It checks the full tool list,
   progress fields, settings masking and tokens.
 - `test/shares.test.ts`: share rescans against the fake slskd, which can simulate a scan in progress (409s).
+- `test/library.test.ts`: library scans with a missing, empty or unreadable music folder, mass removals and `force`.
 - `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
   folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.
