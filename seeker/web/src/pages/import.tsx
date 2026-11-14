@@ -90,8 +90,8 @@ export function ImportPage() {
         <p className="text-[13px] text-bad">{(list.error as Error).message}</p>
       ) : !list.data.exists ? (
         <Empty icon={<FolderInput className="size-6" />} title="No import folder">
-          Seeker looks for music to import in <span className="font-mono text-[12px]">{list.data.dir}</span>. Mount a folder there (set{' '}
-          <span className="font-mono text-[12px]">IMPORT_DIR</span> in your .env) and restart Seeker.
+          Seeker looks for music to import in <span className="font-mono text-[12px]">{list.data.dir}</span>. Mount a folder there and
+          restart Seeker.
         </Empty>
       ) : list.data.folders.length === 0 ? (
         <Empty icon={<FolderInput className="size-6" />} title="Nothing to import">

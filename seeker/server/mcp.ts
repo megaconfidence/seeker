@@ -168,7 +168,7 @@ function maskedSettings(settings: Settings) {
     ...settings,
     checks: {
       ...settings.checks,
-      acoustidKey: settings.checks.acoustidKey ? 'set' : config.acoustidKey ? 'set in .env' : 'not set',
+      acoustidKey: settings.checks.acoustidKey ? 'set' : config.acoustidKey ? 'set by ACOUSTID_API_KEY' : 'not set',
     },
     jellyfin: { ...settings.jellyfin, apiKey: settings.jellyfin.apiKey ? 'set' : 'not set' },
   }

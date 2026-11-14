@@ -484,7 +484,7 @@ export function SettingsPage() {
             label="AcoustID key (optional)"
             hint={
               info.data?.acoustidFromEnv && !settings.checks.acoustidKey ? (
-                'Fingerprints each song to make sure it’s the right one. Using ACOUSTID_API_KEY from your .env; a key here overrides it.'
+                'Fingerprints each song to make sure it’s the right one. Using the ACOUSTID_API_KEY environment variable; a key here overrides it.'
               ) : (
                 <>
                   Fingerprints each song to make sure it’s the right one. Get a free key at{' '}
@@ -498,7 +498,7 @@ export function SettingsPage() {
           >
             <TextSetting
               value={settings.checks.acoustidKey}
-              placeholder={info.data?.acoustidFromEnv ? 'Set in .env' : 'Not set'}
+              placeholder={info.data?.acoustidFromEnv ? 'Set by ACOUSTID_API_KEY' : 'Not set'}
               onSave={(acoustidKey) => save.mutate({ checks: { acoustidKey } })}
             />
           </Field>
@@ -564,7 +564,7 @@ export function SettingsPage() {
         <TokensCard />
 
         <Card id="account" title="Account">
-          <Field label="Password" hint="Set with SEEKER_PASSWORD in your .env. Restart Seeker after changing it.">
+          <Field label="Password" hint="Set with the SEEKER_PASSWORD environment variable. Restart Seeker after changing it.">
             <span />
           </Field>
           <Field
