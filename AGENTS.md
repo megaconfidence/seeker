@@ -6,17 +6,16 @@ for users.
 ## What Seeker is
 
 A self-hosted web app and MCP server that downloads music from Soulseek through [slskd](https://github.com/slskd/slskd),
-checks the files, tags them and files them in a music library. It runs as two containers: `slskd` (the Soulseek client)
-and `seeker` (this code).
+checks the files, tags them and files them in a music library. It's published as a Docker image. slskd is a separate
+dependency that users install themselves, following slskd's own docs.
 
 ## Layout
 
 ```text
-docker-compose.yml          Local stack: slskd + seeker built from ./seeker
-deploy/                     Compose stack using the published image (the README's install); HTTPS override and Caddyfile
 .github/workflows/          CI: typecheck, tests, multi-arch image to GHCR
 docs/screenshots/           README images
 seeker/
+  Dockerfile                The published image
   server/                   Node 24 + Hono; entry point index.ts
     routes.ts               Web API used by the web app (session cookie)
     mcp.ts                  MCP server: every tool (bearer tokens)
@@ -53,7 +52,7 @@ npm run typecheck    # server and web
 npm run build        # web app into web/dist (the server serves it)
 ```
 
-From the repository root, `docker compose up -d --build seeker` rebuilds and restarts the container.
+`docker build -t seeker .` in `seeker/` builds the image locally.
 
 Before you finish a change, `npm run typecheck` and `npm test` must pass.
 
@@ -72,13 +71,14 @@ that built an image.
   together.
 - Images carry their commit (`SEEKER_COMMIT` build argument). Settings → Account and MCP `get_status` show it, which
   is how to check what the server runs.
-- The README's install steps download `deploy/docker-compose.yml`, `deploy/docker-compose.https.yml`,
-  `deploy/Caddyfile` and `.env.example` from `main` by URL, into one folder. Keep those paths, and keep the files
-  working on their own, outside the repository.
 - Never commit secrets: this repository is public.
 
 ## Rules
 
+- **The app only, no deployment setup.** The owner wants users free to run Seeker however they like, so the repository
+  ships the app and its image, nothing else: no compose files, env templates, reverse proxy, VPN, auto-update or slskd
+  setup. The README documents the image (environment variables, folders, port, user) and links to slskd's own docs
+  for installing slskd. UI text and errors name environment variables, never a particular file such as `.env`.
 - **MCP parity.** Everything the web app can do or show must be possible over MCP. When you add or change a feature
   or an API route, add or update the tool in `server/mcp.ts`, then update the expected tool list in
   `test/mcp.test.ts` and the tool table in the README. Mark tools that delete things with `destructiveHint`, and
@@ -135,7 +135,7 @@ that built an image.
   MCP `test_acoustid` say so.
 - The dev server's file watcher restarts it on any change under `seeker/`, even a `.DS_Store`. Restarts drop in-memory
   timers such as the delayed Jellyfin and share rescans.
-- The Docker container and the dev server can both listen on port 7335 (one on IPv6, one on IPv4), so `localhost`
+- A local Seeker container and the dev server can both listen on port 7335 (one on IPv6, one on IPv4), so `localhost`
   may reach either. Stop one, or run a second server on another port; variables set on the command line override
   the env file: `SEEKER_PORT=7336 node --env-file=dev.env server/index.ts`.
 - `/api/events` (server-sent events) stays open, so browser automation must wait for page content, not network idle.
@@ -154,8 +154,8 @@ that built an image.
 
 ## Safety
 
-- Never commit `.env` (Soulseek login, passwords, API keys). `.gitignore` also excludes the music, downloads, import,
-  `seeker-data` and `slskd` folders.
+- Never commit `.env` or `seeker/dev.env` (passwords, API keys). `.gitignore` also excludes the local music,
+  downloads, import, data, `seeker-data` and `slskd` folders.
 - When testing real downloads, use freely licensed music only, such as Nine Inch Nails' *Ghosts I–IV* and *The Slip*,
   or Jonathan Coulton's *Thing a Week* albums (Creative Commons).
 - Don't modify the user's music library except through the app's own features. Test against copies or temporary

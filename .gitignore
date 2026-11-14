@@ -1,8 +1,8 @@
-# Secrets: Soulseek login, passwords and API keys
+# Secrets: passwords and API keys
 .env
 seeker/dev.env
 
-# Your music and the apps' data (also when running from deploy/)
+# Local music and app data, for development (see seeker/dev.env.example)
 music/
 downloads/
 import/
