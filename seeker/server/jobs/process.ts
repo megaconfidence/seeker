@@ -4,6 +4,7 @@ import { parseFile } from 'music-metadata'
 import type { JobTarget, Settings, TargetTrack } from '../../shared/types.ts'
 import { config } from '../config.ts'
 import { all, exec } from '../db.ts'
+import { describeIdentity, fileErrorMessage, folderProblem, isPermissionError } from '../folders.ts'
 import { scheduleJellyfinRefresh } from '../jellyfin.ts'
 import { AUDIO_EXTENSIONS, scanFiles, scanLibrary } from '../library/scan.ts'
 import { logger } from '../log.ts'
@@ -204,6 +205,39 @@ async function destinationFromTags(file: string, row: FileRow, template: string,
 
 const insideLibrary = (file: string) => path.resolve(file).startsWith(config.musicDir + path.sep)
 
+interface Tagged {
+  // The file to move into the library: the original, or a tagged copy of it.
+  file: string
+  info: string | null
+  // Shown with the filed track when it kept its old tags.
+  note: string | null
+}
+
+// When Seeker isn't allowed to change a file (another user's download, a read-only file), it tags a
+// copy instead, provided it can remove the original afterwards. If it can't do either, nothing is
+// filed: a track with the uploader's tags in the library is worse than a clear error.
+async function tagForLibrary(file: string, data: TagData, cover: Buffer | null, copy: string, isImport: boolean): Promise<Tagged> {
+  try {
+    writeTags(file, data, cover)
+    return { file, info: null, note: null }
+  } catch (error) {
+    if (!isPermissionError(error)) return { file, info: null, note: `filed without new tags (${errorMessage(error)})` }
+    const dir = path.dirname(file)
+    if (folderProblem(dir)) {
+      throw new Error(
+        isImport
+          ? `Seeker isn’t allowed to change ${file} or move it out of ${dir}. Let ${describeIdentity()} write there, or import with Copy.`
+          : `Seeker isn’t allowed to change the downloaded file or move it out of ${dir}. Run Seeker as the same user as slskd, or let ${describeIdentity()} write there.`,
+      )
+    }
+    await fs.mkdir(path.dirname(copy), { recursive: true })
+    await fs.copyFile(file, copy)
+    await fs.chmod(copy, 0o644)
+    writeTags(copy, data, cover)
+    return { file: copy, info: 'Seeker isn’t allowed to change the original, so it tagged a copy', note: null }
+  }
+}
+
 // When upgrading, remove the old copy of a track if it lives somewhere else in the library.
 async function replaceOldTrack(albumId: string, track: TargetTrack, destination: string, info: AudioInfo): Promise<boolean> {
   const rows = all<{ path: string; disc_no: number | null; track_no: number | null; norm_title: string }>(
@@ -318,14 +352,26 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
         }
       }
 
+      let filed = working
+      let note: string | null = null
       if (target && track) {
-        try {
-          writeTags(working, tagsFor(target, track), cover)
-        } catch (error) {
-          store.logJob(jobId, 'warn', `${name}: could not write tags (${errorMessage(error)})`)
-        }
+        const copy = path.join(config.dataDir, 'tmp', jobId, `${row.id}-tagged${path.extname(working)}`)
+        const tagged = await tagForLibrary(working, tagsFor(target, track), cover, copy, isImport)
+        filed = tagged.file
+        note = tagged.note
+        if (tagged.info) store.logJob(jobId, 'info', `${name}: ${tagged.info}`)
+        if (note) store.logJob(jobId, 'warn', `${name}: ${note}`)
       }
-      if (path.resolve(working) !== path.resolve(destination)) await moveFile(working, destination)
+      if (path.resolve(filed) !== path.resolve(destination)) {
+        const leftover = await moveFile(filed, destination)
+        if (leftover) store.logJob(jobId, 'warn', `${name}: filed, but ${filed} couldn’t be removed (${fileErrorMessage(leftover)})`)
+      }
+      // A tagged copy went in because the original couldn't be changed; remove the original, as a move would.
+      if (filed !== working && !copyMode && path.resolve(working) !== path.resolve(destination)) {
+        await fs.rm(working, { force: true }).catch((error) => {
+          store.logJob(jobId, 'warn', `${name}: filed a tagged copy, but couldn’t remove ${working} (${fileErrorMessage(error)})`)
+        })
+      }
       if (existing && !sameFile && path.resolve(existing) !== path.resolve(destination)) await fs.rm(existing, { force: true })
       if (target?.replaceLibraryAlbumId && track && (await replaceOldTrack(target.replaceLibraryAlbumId, track, destination, info))) {
         touchedLibrary = true
@@ -337,7 +383,7 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
       if (isImport && !copyMode && path.resolve(local).startsWith(config.importDir + path.sep)) {
         await removeEmptyDirs(path.dirname(local), config.importDir)
       }
-      store.patchFile(row.id, { state: 'imported', local_path: destination, error: null })
+      store.patchFile(row.id, { state: 'imported', local_path: destination, error: note })
       exec(
         `INSERT OR REPLACE INTO imports (path, deezer_album_id, deezer_track_id, mb_release_id, job_id, at)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -347,11 +393,12 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
       if (row.transfer_id) void slskd.cancel(row.username, row.transfer_id, true)
     } catch (error) {
       if (copyMode) await fs.rm(working, { force: true }).catch(() => {})
-      store.patchFile(row.id, { state: 'failed', error: errorMessage(error) })
-      store.logJob(jobId, 'error', `${name}: ${errorMessage(error)}`)
+      store.patchFile(row.id, { state: 'failed', error: fileErrorMessage(error) })
+      store.logJob(jobId, 'error', `${name}: ${fileErrorMessage(error)}`)
     }
   }
-  if (copyMode) await fs.rm(path.join(config.dataDir, 'tmp', jobId), { recursive: true, force: true }).catch(() => {})
+  // Copies made for copy-mode imports, and tagged copies of files Seeker couldn't change.
+  await fs.rm(path.join(config.dataDir, 'tmp', jobId), { recursive: true, force: true }).catch(() => {})
 
   if (imported.length) {
     if (cover) {

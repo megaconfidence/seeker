@@ -4,8 +4,8 @@
 # https://github.com/slskd/slskd#quick-start. Then:
 #
 #   1. Fill in the values below.
-#   2. Create the folders you mount, owned by the user below. Docker would otherwise create them
-#      owned by root, and Seeker couldn't write to them.
+#   2. Make sure the user below can write to your music, downloads and import folders. Seeker
+#      takes care of its own data folder.
 #   3. Start Seeker with: docker compose up -d
 #
 # Seeker is then at http://<your-server>:7335. The README describes every setting.
@@ -15,11 +15,13 @@ services:
     image: ghcr.io/megaconfidence/seeker:latest
     container_name: seeker
     restart: unless-stopped
-    # Use the same user and group as slskd, so Seeker can move finished downloads out of its folder.
-    user: "1000:1000"
     ports:
       - "7335:7335"
     environment:
+      # The user and group Seeker runs as. Use the same as slskd, so Seeker can move finished
+      # downloads out of its folder. With rootless Docker, 0 means you, the user running Docker.
+      PUID: 1000
+      PGID: 1000
       SEEKER_PASSWORD: choose-a-password
       # slskd's address. Inside a container, localhost is the container itself. If slskd runs in
       # this file or on a shared Docker network, use http://slskd:5030.

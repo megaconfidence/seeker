@@ -27,7 +27,7 @@ function fileState(file: JobFile): { text: string; tone: string } {
     case 'downloaded':
       return { text: 'Downloaded', tone: 'text-muted' }
     case 'imported':
-      return { text: 'In library', tone: 'text-ok' }
+      return file.error ? { text: `In library · ${file.error}`, tone: 'text-warn' } : { text: 'In library', tone: 'text-ok' }
     case 'skipped':
       return { text: 'Already had it', tone: 'text-muted' }
     case 'failed':

@@ -1,12 +1,21 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { config } from './config.ts'
+import { databaseOpenFailed, ensureDataDir } from './folders.ts'
 
-fs.mkdirSync(config.dataDir, { recursive: true })
+ensureDataDir()
 
-export const db = new DatabaseSync(path.join(config.dataDir, 'seeker.db'))
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;')
+export const db = openDatabase(path.join(config.dataDir, 'seeker.db'))
+
+function openDatabase(file: string): DatabaseSync {
+  try {
+    const database = new DatabaseSync(file)
+    database.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;')
+    return database
+  } catch (error) {
+    return databaseOpenFailed(error)
+  }
+}
 
 const migrations = [
   `

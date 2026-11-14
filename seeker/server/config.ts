@@ -10,6 +10,13 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
+// The container entrypoint applies UMASK to the process; files moved into the library get the
+// matching mode, 644 by default.
+function fileMode(): number {
+  const umask = env('UMASK', '022')
+  return /^[0-7]{3,4}$/.test(umask) ? 0o666 & ~Number.parseInt(umask, 8) : 0o644
+}
+
 export const config = {
   version: '0.2.0',
   // Short commit id baked into published images; empty in development.
@@ -19,6 +26,7 @@ export const config = {
   downloadsDir: path.resolve(env('SEEKER_DOWNLOADS_DIR', '/downloads')),
   musicDir: path.resolve(env('SEEKER_MUSIC_DIR', '/music')),
   importDir: path.resolve(env('SEEKER_IMPORT_DIR', '/import')),
+  fileMode: fileMode(),
   password: env('SEEKER_PASSWORD'),
   acoustidKey: env('ACOUSTID_API_KEY'),
   slskdUrl: env('SLSKD_URL', 'http://slskd:5030').replace(/\/+$/, ''),

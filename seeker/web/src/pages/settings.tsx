@@ -102,6 +102,7 @@ interface Info {
   musicDir: string
   downloadsDir: string
   importDir: string
+  folderProblems: Record<'downloads' | 'music' | 'import', string | null>
   slskdUrl: string
   version: string
   acoustidFromEnv: boolean
@@ -449,6 +450,14 @@ export function SettingsPage() {
         <QualityCard settings={settings} save={save} />
 
         <Card id="library" title="Library" description={info.data ? <>Files are saved to <code className="font-mono">{info.data.musicDir}</code>.</> : undefined}>
+          {info.data &&
+            Object.values(info.data.folderProblems)
+              .filter((problem): problem is string => !!problem)
+              .map((problem) => (
+                <p key={problem} className="pt-4 text-[12.5px] text-bad">
+                  {problem}
+                </p>
+              ))}
           <div className="py-4">
             <div className="text-[13px] font-medium">File names</div>
             <div className="mt-0.5 mb-2 text-[12.5px] text-muted">

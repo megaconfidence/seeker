@@ -17,6 +17,7 @@ docker-compose.yml          Example for users: Seeker alone, from the published 
 docs/screenshots/           README images
 seeker/
   Dockerfile                The published image
+  docker-entrypoint.sh      Starts as root, gives /data to PUID:PGID, then runs Seeker as that user (su-exec)
   server/                   Node 24 + Hono; entry point index.ts
     routes.ts               Web API used by the web app (session cookie)
     mcp.ts                  MCP server: every tool (bearer tokens)
@@ -31,6 +32,7 @@ seeker/
     metadata/               Deezer and MusicBrainz clients (rate limited, cached)
     db.ts                   SQLite (node:sqlite) and migrations
     settings.ts, config.ts  Saved settings with defaults; environment variables
+    folders.ts              Folder checks (fatal for /data), user ids as the host sees them, permission messages
     status.ts, watchlist.ts, jellyfin.ts, backup.ts, auth.ts, log.ts
   web/src/                  React 19 + Vite + Tailwind CSS v4 + TanStack Query + React Router
     pages/                  One file per page
@@ -143,6 +145,12 @@ reporting the last commit that built an image.
   may reach either. Stop one, or run a second server on another port; variables set on the command line override
   the env file: `SEEKER_PORT=7336 node --env-file=dev.env server/index.ts`.
 - `/api/events` (server-sent events) stays open, so browser automation must wait for page content, not network idle.
+- Rootless Docker maps container users to subordinate ids on the host (container 1000 → host 100999), so a host folder
+  owned by the user isn't writable for container user 1000. The entrypoint fixes `/data` when the container starts as
+  root (`PUID`/`PGID`); with `--user` it can't. `db.ts` calls `ensureDataDir()` before opening SQLite, so a data folder
+  Seeker can't write to stops it with the ids and the `chown` to run, never a raw `SQLITE_CANTOPEN`.
+- Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,
+  `tagForLibrary()` in `jobs/process.ts` tags a copy if it can remove the original, and otherwise fails the file.
 
 ## Tests
 

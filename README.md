@@ -118,7 +118,7 @@ docker compose up -d
 
 ```bash
 docker run -d --name seeker --restart unless-stopped \
-  --user 1000:1000 \
+  -e PUID=1000 -e PGID=1000 \
   -p 7335:7335 \
   -e SEEKER_PASSWORD=choose-a-password \
   -e SLSKD_URL=http://192.168.1.10:5030 \
@@ -130,10 +130,15 @@ docker run -d --name seeker --restart unless-stopped \
   ghcr.io/megaconfidence/seeker:latest
 ```
 
-Either way, run Seeker as the same user as slskd, so it can move finished downloads out of slskd's folder. Create the
-folders you mount before the first start, owned by that user; Docker would otherwise create them owned by root, and
-Seeker couldn't write to them. Then open `http://<your-server>:7335` and sign in with `SEEKER_PASSWORD`. Every setting
-is listed under [Configuration](#configuration), for whichever way you run it.
+Either way, set `PUID` and `PGID` to the user and group slskd runs as, so Seeker can move finished downloads out of
+slskd's folder, and make sure that user can write to your music, downloads and import folders. Seeker gives its own
+data folder to that user when it starts. Then open `http://<your-server>:7335` and sign in with `SEEKER_PASSWORD`.
+Every setting is listed under [Configuration](#configuration), for whichever way you run it.
+
+**Rootless Docker.** Users in the container are other users on the host: user 1000 is a "subordinate" id such as
+100999 (see `/etc/subuid`). `PUID=0` and `PGID=0` run Seeker as you, so the files it creates are yours on the host. If
+you run Seeker with `--user` or `user:` instead, it can't change who owns its data folder; when it can't write there,
+it stops and says which `chown` fixes it.
 
 ## Configuration
 
@@ -145,6 +150,8 @@ Environment variables:
 | `SLSKD_URL` | slskd's address, as Seeker reaches it | `http://slskd:5030` |
 | `SLSKD_API_KEY` | slskd API key that can make changes | |
 | `ACOUSTID_API_KEY` | Optional: fingerprint every download | |
+| `PUID`, `PGID` | User and group Seeker runs as; the same as slskd's | `1000` |
+| `UMASK` | Permissions for new files and folders; `002` makes them writable for the group | `022` |
 | `TZ` | Time zone | `UTC` |
 
 Folders, which Seeker must be able to write to:
@@ -156,8 +163,9 @@ Folders, which Seeker must be able to write to:
 | `/music` | Your library, where Seeker files new music |
 | `/import` | Optional: music you already have, to add to your library |
 
-The web app and the MCP server listen on port 7335. The container runs as user 1000 and group 1000 unless you choose
-others, for example with `--user`.
+The web app and the MCP server listen on port 7335. The container starts as root only to give `/data` to `PUID:PGID`,
+then runs Seeker as that user. With `--user` or `user:`, it runs as that user from the start and leaves `/data` alone.
+At startup, Seeker checks that it can write to each folder, and **Settings → Library** shows any it can't.
 
 Everything else is in **Settings** in the app:
 
@@ -276,9 +284,14 @@ rm -f /path/to/seeker-data/seeker.db-wal /path/to/seeker-data/seeker.db-shm
 - **Downloads never start, or users refuse them**: share some music in slskd, and forward its listening port (50300
   by default) on your router. See
   [listen port](https://github.com/slskd/slskd/blob/master/docs/config.md#listen-ip-address-and-port) in slskd's docs.
-- **Permission errors**: Seeker must be able to write to its data folder, and to move files out of slskd's download
-  folder into your library. Run it as the same user as slskd, and make sure that user owns those folders. Folders that
-  Docker created for you belong to root.
+- **Seeker stops at startup with "Seeker can't use its data folder"**: the user it runs as can't write to `/data`.
+  The message gives that user's ids, as the host sees them, and the fix. Usually you remove `--user` or `user:` and
+  set `PUID` and `PGID`, so Seeker can fix the folder itself. On rootless Docker, the ids on the host are subordinate
+  ids, so a folder you own isn't writable for container user 1000 (see [Rootless Docker](#run-seeker)).
+- **Permission errors in a download's log**: Seeker must be able to move files out of slskd's download folder and into
+  your library. Run it as the same user as slskd, and make sure that user can write to your music folder. Folders that
+  Docker created for you belong to root. If Seeker isn't allowed to change a downloaded file but can change its folder,
+  it tags a copy instead; if it can't change either, it files nothing and says so.
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.

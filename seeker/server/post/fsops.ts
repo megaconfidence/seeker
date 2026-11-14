@@ -1,9 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { config } from '../config.ts'
+import { logger } from '../log.ts'
 import { sleep } from '../util.ts'
 
+const log = logger('files')
 const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i
+let chmodFailed = false
 
 function truncateBytes(value: string, maxBytes: number): string {
   if (Buffer.byteLength(value) <= maxBytes) return value
@@ -75,8 +79,11 @@ export async function exists(file: string): Promise<boolean> {
 }
 
 // Atomic move: rename when possible, otherwise copy to a hidden temp file in the destination and rename.
-export async function moveFile(source: string, destination: string): Promise<void> {
+// Once the file is in place, failing to remove the source doesn't undo the move: that error is
+// returned instead of thrown.
+export async function moveFile(source: string, destination: string): Promise<Error | undefined> {
   await fs.mkdir(path.dirname(destination), { recursive: true })
+  let leftover: Error | undefined
   try {
     await fs.rename(source, destination)
   } catch (error) {
@@ -92,9 +99,21 @@ export async function moveFile(source: string, destination: string): Promise<voi
       await fs.rm(temp, { force: true })
       throw copyError
     }
-    await fs.rm(source, { force: true })
+    leftover = await fs.rm(source, { force: true }).then(
+      () => undefined,
+      (rmError: Error) => rmError,
+    )
   }
-  await fs.chmod(destination, 0o644).catch(() => {})
+  await fs.chmod(destination, config.fileMode).catch((error) => {
+    // Some network shares don't allow changing permissions at all, so only the first failure is a warning.
+    if (chmodFailed) return log.debug(`Could not set the permissions of ${destination}`, error)
+    chmodFailed = true
+    log.warn(
+      `Could not set the permissions of ${destination}, so other programs may not be able to read new files. Later failures are only logged at debug level`,
+      error,
+    )
+  })
+  return leftover
 }
 
 async function listFiles(dir: string, out: string[] = []): Promise<string[]> {

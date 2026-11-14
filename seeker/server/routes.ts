@@ -28,6 +28,7 @@ import {
 } from './catalog.ts'
 import { config } from './config.ts'
 import { subscribe } from './events.ts'
+import { folderProblems } from './folders.ts'
 import { testJellyfin } from './jellyfin.ts'
 import { testAcoustidKey } from './post/verify.ts'
 import {
@@ -151,6 +152,7 @@ export function apiRoutes() {
       musicDir: config.musicDir,
       downloadsDir: config.downloadsDir,
       importDir: config.importDir,
+      folderProblems: folderProblems(),
       slskdUrl: config.slskdUrl,
       acoustidFromEnv: !!config.acoustidKey,
       searchBudget: searchBudget(),

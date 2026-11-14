@@ -7,6 +7,7 @@ import { announcePassword, removeCliToken, verifyToken } from './auth.ts'
 import { startBackups } from './backup.ts'
 import { config } from './config.ts'
 import { db } from './db.ts'
+import { checkFolders, describeIdentity } from './folders.ts'
 import { startEngine } from './jobs/engine.ts'
 import { rebuildOwnedIndex } from './library/owned.ts'
 import { startLibraryScanner } from './library/scan.ts'
@@ -58,6 +59,7 @@ if (fs.existsSync(indexHtml)) {
   app.get('/', (c) => c.text('The web UI is not built. Run `npm run build`, or use the Vite dev server.'))
 }
 
+checkFolders()
 announcePassword()
 removeCliToken()
 rebuildOwnedIndex()
@@ -70,6 +72,7 @@ startBackups()
 const server = serve({ fetch: app.fetch, port: config.port, hostname: '0.0.0.0' }, (info) => {
   log.info(`Seeker ${config.version}${config.commit ? ` (${config.commit})` : ''} listening on http://localhost:${info.port}`)
   log.info(`Library: ${config.musicDir} · Downloads: ${config.downloadsDir} · slskd: ${config.slskdUrl}`)
+  log.info(`Running as ${describeIdentity()}`)
 })
 
 function shutdown() {

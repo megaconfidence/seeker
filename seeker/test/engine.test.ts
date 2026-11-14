@@ -839,6 +839,73 @@ test('import: files in the import folder are matched to the album, copied in and
   assert.deepEqual(slskd.batchesFor(job.id), [])
 })
 
+// Root can change read-only files, so these only mean something for other users.
+const asRoot = process.getuid?.() === 0 && 'root can change read-only files'
+
+// Puts two tracks of a new album in the import folder, read-only, and lists it for importing.
+async function readOnlyImport(albumId: number, artist: string, album: string, options: { lockFolder: boolean }) {
+  const tracks: Track[] = [
+    { title: 'Locked One', track: 1, duration: 16, fixture: s16 },
+    { title: 'Locked Two', track: 2, duration: 17, fixture: s17 },
+  ]
+  metadata.addAlbum(deezerAlbum(albumId, { id: albumId - 500, name: artist }, album, 2016, tracks))
+  const source = path.join(dirs.import, `${artist} - ${album}`)
+  await fs.mkdir(source, { recursive: true })
+  const files = [path.join(source, '01 - Locked One.flac'), path.join(source, '02 - Locked Two.flac')]
+  await fs.copyFile(s16, files[0]!)
+  await fs.copyFile(s17, files[1]!)
+  const folder = (await importer.listImportFolders()).folders.find((item) => item.name === `${artist} - ${album}`)
+  assert.ok(folder)
+  for (const file of files) await fs.chmod(file, 0o444)
+  if (options.lockFolder) await fs.chmod(source, 0o555)
+  const unlock = async () => {
+    await fs.chmod(source, 0o755).catch(() => {})
+    for (const file of files) await fs.chmod(file, 0o644).catch(() => {})
+  }
+  return { folder, files, source, unlock }
+}
+
+test('import (move): files Seeker may not change, in a folder it may not change, fail clearly and nothing is filed', { timeout: 30_000, skip: asRoot }, async () => {
+  const { folder, files, unlock } = await readOnlyImport(1013, 'Locked Artist', 'Read Only', { lockFolder: true })
+  try {
+    const job = await importer.importFolder(folder.id, { albumId: 1013 }, 'move')
+    const row = await finished(job.id)
+    assert.equal(row.status, 'failed', dump(job.id))
+    assert.match(row.error ?? '', /Seeker isn’t allowed to change .*01 - Locked One\.flac or move it out of/, dump(job.id))
+    assert.match(row.error ?? '', /or import with Copy/)
+    assert.deepEqual(
+      store.jobFiles(job.id).map((file) => file.state),
+      ['failed', 'failed'],
+    )
+    // Nothing went into the library with the uploader's tags, and the originals are as they were.
+    assert.equal(await exists(path.join(dirs.music, 'Locked Artist')), false)
+    assert.ok((await fs.readFile(files[0]!)).equals(await fs.readFile(s16)))
+    assert.ok((await fs.readFile(files[1]!)).equals(await fs.readFile(s17)))
+  } finally {
+    await unlock()
+  }
+})
+
+test('import (move): a read-only file in a folder Seeker may change is filed as a tagged copy and the original goes', { timeout: 30_000, skip: asRoot }, async () => {
+  const { folder, files, source, unlock } = await readOnlyImport(1014, 'Copied Artist', 'Read Only Files', { lockFolder: false })
+  try {
+    const job = await importer.importFolder(folder.id, { albumId: 1014 }, 'move')
+    const row = await finished(job.id)
+    assert.equal(row.status, 'completed', dump(job.id))
+    assert.ok(logOf(job.id).some((line) => line.includes('so it tagged a copy')), dump(job.id))
+    const albumDir = path.join(dirs.music, 'Copied Artist', 'Read Only Files (2016)')
+    assert.deepEqual(await listFiles(albumDir), ['01 - Locked One.flac', '02 - Locked Two.flac'])
+    const { common } = await parseFile(path.join(albumDir, '01 - Locked One.flac'))
+    assert.equal(common.album, 'Read Only Files')
+    assert.equal(common.artist, 'Copied Artist')
+    // As with any move, the originals are gone, and so is their folder.
+    for (const file of files) assert.equal(await exists(file), false)
+    assert.equal(await exists(source), false)
+  } finally {
+    await unlock()
+  }
+})
+
 test(
   'album (3 tracks): a switch that leaves two tracks to replace still keeps the album in one quality',
   { timeout: 30_000 },

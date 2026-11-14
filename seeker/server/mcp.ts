@@ -5,6 +5,7 @@ import type { ImportCandidate, Job, LibraryTrack, Settings } from '../shared/typ
 import { createToken, listTokens, revokeToken } from './auth.ts'
 import { albumPage, albumYears, artistPage, mbAlbumPage, NotFoundError, previewQuery, searchCatalog, searchMusicBrainz } from './catalog.ts'
 import { config } from './config.ts'
+import { folderProblems } from './folders.ts'
 import { testJellyfin } from './jellyfin.ts'
 import {
   AlreadyOwnedError,
@@ -866,7 +867,7 @@ function buildServer(): McpServer {
     {
       title: 'Seeker status',
       description:
-        'Soulseek connection and sharing, download counts, library size, the search budget, where files live, and the latest server warnings and errors (the first place to look when something isn’t working).',
+        'Soulseek connection and sharing, download counts, library size, the search budget, where files live and whether Seeker can write there, and the latest server warnings and errors (the first place to look when something isn’t working).',
       inputSchema: {},
       annotations: local,
     },
@@ -876,6 +877,7 @@ function buildServer(): McpServer {
           ...appStatus(),
           searchBudget: searchBudget(),
           folders: { music: config.musicDir, downloads: config.downloadsDir, import: config.importDir },
+          folderProblems: folderProblems(),
           slskdUrl: config.slskdUrl,
           recentProblems: recentProblems(10).map((problem) => ({
             at: new Date(problem.at).toISOString(),
