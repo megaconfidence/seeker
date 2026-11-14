@@ -99,7 +99,22 @@ Pull the image:
 docker pull ghcr.io/megaconfidence/seeker:latest
 ```
 
-Then start it with your slskd's address and API key, and your folders. For example, with `docker run`:
+Then start it with your slskd's address and API key, and your folders.
+
+**With Docker Compose.** Download the [compose file](docker-compose.yml) into a folder for Seeker:
+
+```bash
+mkdir seeker && cd seeker
+curl -fsSLO https://raw.githubusercontent.com/megaconfidence/seeker/main/docker-compose.yml
+```
+
+Fill in the values it marks, then start Seeker:
+
+```bash
+docker compose up -d
+```
+
+**With `docker run`:**
 
 ```bash
 docker run -d --name seeker --restart unless-stopped \
@@ -115,9 +130,10 @@ docker run -d --name seeker --restart unless-stopped \
   ghcr.io/megaconfidence/seeker:latest
 ```
 
-Run Seeker as the same user as slskd (`--user`), so it can move finished downloads out of slskd's folder. Then open
-`http://<your-server>:7335` and sign in with `SEEKER_PASSWORD`. Every setting is listed under
-[Configuration](#configuration), for whichever way you run it.
+Either way, run Seeker as the same user as slskd, so it can move finished downloads out of slskd's folder. Create the
+folders you mount before the first start, owned by that user; Docker would otherwise create them owned by root, and
+Seeker couldn't write to them. Then open `http://<your-server>:7335` and sign in with `SEEKER_PASSWORD`. Every setting
+is listed under [Configuration](#configuration), for whichever way you run it.
 
 ## Configuration
 
@@ -224,9 +240,17 @@ they're set.
 
 ## Updates
 
-Every change to `main`, apart from documentation, is published as a new image once the tests pass. `latest` follows
-`main`, and every build is also tagged `sha-<commit>`, if you'd rather stay on one. To update, pull the image and
-recreate the container.
+Every change to the app on `main` is published as a new image once the tests pass. `latest` follows `main`, and every
+build is also tagged `sha-<commit>`, if you'd rather stay on one.
+
+To update with Compose, run this in Seeker's folder:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+With `docker run`, pull the image, remove the container (`docker rm -f seeker`) and run the same command again.
 
 **Settings → Account** shows the build you're running (`build 1a2b3c4`, the commit's short id), and so does
 `get_status` over MCP.
@@ -252,8 +276,9 @@ rm -f /path/to/seeker-data/seeker.db-wal /path/to/seeker-data/seeker.db-shm
 - **Downloads never start, or users refuse them**: share some music in slskd, and forward its listening port (50300
   by default) on your router. See
   [listen port](https://github.com/slskd/slskd/blob/master/docs/config.md#listen-ip-address-and-port) in slskd's docs.
-- **Permission errors**: Seeker must be able to move files out of slskd's download folder and into your library. Run
-  it as the same user as slskd, and make sure that user can write to your music folder.
+- **Permission errors**: Seeker must be able to write to its data folder, and to move files out of slskd's download
+  folder into your library. Run it as the same user as slskd, and make sure that user owns those folders. Folders that
+  Docker created for you belong to root.
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.
@@ -275,6 +300,7 @@ docker build -t seeker .     # build the image yourself
 ```
 
 ```text
+docker-compose.yml     Example compose file for running Seeker
 seeker/server/         API, download engine, MCP server
 seeker/web/            Web app
 seeker/shared/         Types shared by the server and the web app
@@ -289,8 +315,8 @@ seeker/Dockerfile      The image
 `.github/workflows/docker.yml` checks the types and runs the tests on every push to `main` and every pull request.
 Only if they pass does it build the image, for x86 and ARM. Pushes to `main` publish it as `latest` and
 `sha-<commit>`, and a version tag such as `v0.2.0` publishes `0.2.0` and `0.2`. Pull requests are built but never
-published, and changes that only touch documentation (Markdown files and `docs/`) skip the workflow. A fork publishes
-to `ghcr.io/<its-owner>/seeker`.
+published, and changes that only touch documentation (Markdown files and `docs/`) or the example compose file skip the
+workflow. A fork publishes to `ghcr.io/<its-owner>/seeker`.
 
 ---
 

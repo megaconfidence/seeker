@@ -12,6 +12,7 @@ dependency that users install themselves, following slskd's own docs.
 ## Layout
 
 ```text
+docker-compose.yml          Example for users: Seeker alone, from the published image
 .github/workflows/          CI: typecheck, tests, multi-arch image to GHCR
 docs/screenshots/           README images
 seeker/
@@ -61,9 +62,9 @@ Before you finish a change, `npm run typecheck` and `npm test` must pass.
 The repository is public at `github.com/megaconfidence/seeker`. Every push to `main` runs
 `.github/workflows/docker.yml`: typecheck and tests, then a multi-arch image published as
 `ghcr.io/megaconfidence/seeker:latest` and `:sha-<commit>`. The owner's home server runs Watchtower, which replaces
-the running Seeker container with the new image on its next check. Pushes that only change Markdown files or `docs/`
-skip the workflow (`paths-ignore`): they publish and deploy nothing, and the server keeps reporting the last commit
-that built an image.
+the running Seeker container with the new image on its next check. Pushes that only change Markdown files, `docs/` or
+`docker-compose.yml` skip the workflow (`paths-ignore`): they publish and deploy nothing, and the server keeps
+reporting the last commit that built an image.
 
 - **A push to `main` is a production deploy.** Don't push work in progress there; use a branch and a pull request
   (pull requests are tested and built, never published). Only push or tag when the owner asks.
@@ -71,14 +72,17 @@ that built an image.
   together.
 - Images carry their commit (`SEEKER_COMMIT` build argument). Settings → Account and MCP `get_status` show it, which
   is how to check what the server runs.
+- The README's install downloads `docker-compose.yml` from `main` by URL, so keep it at the repository root, and keep
+  its settings in step with `server/config.ts` and the README's configuration tables.
 - Never commit secrets: this repository is public.
 
 ## Rules
 
-- **The app only, no deployment setup.** The owner wants users free to run Seeker however they like, so the repository
-  ships the app and its image, nothing else: no compose files, env templates, reverse proxy, VPN, auto-update or slskd
-  setup. The README documents the image (environment variables, folders, port, user) and links to slskd's own docs
-  for installing slskd. UI text and errors name environment variables, never a particular file such as `.env`.
+- **The app, its image and one compose file.** The owner wants users free to run Seeker however they like, so the
+  repository ships the app, its image and `docker-compose.yml` (Seeker alone, from the published image), nothing
+  else: no slskd setup, env templates, reverse proxy, VPN or auto-update. The README documents the image (environment
+  variables, folders, port, user) and links to slskd's own docs for installing slskd. UI text and errors name
+  environment variables, never a particular file such as `.env`.
 - **MCP parity.** Everything the web app can do or show must be possible over MCP. When you add or change a feature
   or an API route, add or update the tool in `server/mcp.ts`, then update the expected tool list in
   `test/mcp.test.ts` and the tool table in the README. Mark tools that delete things with `destructiveHint`, and

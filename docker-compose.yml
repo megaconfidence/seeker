@@ -1,0 +1,37 @@
+# Seeker, a self-hosted music downloader for Soulseek: https://github.com/megaconfidence/seeker
+#
+# Seeker works through slskd, which this file doesn't include. Set slskd up first by following
+# https://github.com/slskd/slskd#quick-start. Then:
+#
+#   1. Fill in the values below.
+#   2. Create the folders you mount, owned by the user below. Docker would otherwise create them
+#      owned by root, and Seeker couldn't write to them.
+#   3. Start Seeker with: docker compose up -d
+#
+# Seeker is then at http://<your-server>:7335. The README describes every setting.
+
+services:
+  seeker:
+    image: ghcr.io/megaconfidence/seeker:latest
+    container_name: seeker
+    restart: unless-stopped
+    # Use the same user and group as slskd, so Seeker can move finished downloads out of its folder.
+    user: "1000:1000"
+    ports:
+      - "7335:7335"
+    environment:
+      SEEKER_PASSWORD: choose-a-password
+      # slskd's address. Inside a container, localhost is the container itself. If slskd runs in
+      # this file or on a shared Docker network, use http://slskd:5030.
+      SLSKD_URL: http://192.168.1.10:5030
+      # An slskd API key that can make changes (see "Set up slskd" in the README).
+      SLSKD_API_KEY: your-slskd-api-key
+      # Optional: an AcoustID application key, to check every download's fingerprint.
+      # ACOUSTID_API_KEY: your-acoustid-key
+      # Optional: your time zone. The default is UTC.
+      # TZ: America/New_York
+    volumes:
+      - ./seeker-data:/data                  # Seeker's database and its daily backups
+      - /path/to/slskd/downloads:/downloads  # slskd's download folder
+      - /path/to/music:/music                # your library
+      - /path/to/import:/import              # optional: music to add to your library
