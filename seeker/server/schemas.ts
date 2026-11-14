@@ -19,6 +19,7 @@ export const settingsSchema = z
     jellyfin: z.object({ url: z.string().max(300), apiKey: z.string().max(200) }).partial(),
     watchlist: z.object({ intervalHours: z.number().min(1).max(168), types: recordTypes }).partial(),
     wishlist: z.object({ enabled: z.boolean() }).partial(),
+    shares: z.object({ autoRescan: z.boolean(), quietMinutes: z.number().min(0).max(1440) }).partial(),
   })
   .partial()
 

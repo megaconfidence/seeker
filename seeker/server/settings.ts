@@ -28,11 +28,20 @@ export const DEFAULT_SETTINGS: Settings = {
   wishlist: {
     enabled: true,
   },
+  shares: {
+    autoRescan: true,
+    quietMinutes: 30,
+  },
 }
 
 type Section = keyof Settings
 
 let cached: Settings | null = null
+const listeners = new Set<(sections: Section[]) => void>()
+
+export function onSettingsChange(listener: (sections: Section[]) => void) {
+  listeners.add(listener)
+}
 
 export function getSettings(): Settings {
   if (cached) return cached
@@ -53,8 +62,8 @@ export function getSettings(): Settings {
 
 export function updateSettings(patch: Partial<{ [K in Section]: Partial<Settings[K]> }>): Settings {
   const settings = structuredClone(getSettings())
-  for (const section of Object.keys(patch) as Section[]) {
-    if (!(section in DEFAULT_SETTINGS)) continue
+  const sections = (Object.keys(patch) as Section[]).filter((section) => section in DEFAULT_SETTINGS)
+  for (const section of sections) {
     Object.assign(settings[section], patch[section])
     exec('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
       section,
@@ -62,5 +71,6 @@ export function updateSettings(patch: Partial<{ [K in Section]: Partial<Settings
     ])
   }
   cached = settings
+  for (const listener of listeners) listener(sections)
   return settings
 }

@@ -14,7 +14,7 @@ import { scoreTrack, TRACK_THRESHOLD, type TrackWant } from '../soulseek/match.t
 import { qualityOf, type Quality } from '../soulseek/quality.ts'
 import { albumQueries, trackQueries } from '../soulseek/queries.ts'
 import { searchSoulseek } from '../soulseek/search.ts'
-import { classifyTransfer, slskd, type SlskdFile, type SlskdTransfer } from '../soulseek/slskd.ts'
+import { classifyTransfer, slskd, SlskdError, type SlskdFile, type SlskdTransfer } from '../soulseek/slskd.ts'
 import { onSoulseekReady, soulseekReady } from '../status.ts'
 import { errorMessage, sleep } from '../util.ts'
 import { processJob } from './process.ts'
@@ -155,10 +155,16 @@ async function runSearchLoop() {
       const next = get<JobRow>("SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1")
       if (!next) break
       activeTaskJob = next.id
+      let outcome: 'done' | 'waiting'
       try {
-        await runJob(next.id)
+        outcome = await runJob(next.id)
       } finally {
         activeTaskJob = null
+      }
+      if (outcome === 'waiting') {
+        // slskd stopped answering (it does while rescanning a big share); try again shortly.
+        setTimeout(kick, 30_000).unref()
+        break
       }
     }
   } finally {
@@ -166,9 +172,11 @@ async function runSearchLoop() {
   }
 }
 
-async function runJob(jobId: string) {
+const slskdDidntAnswer = (error: unknown) => error instanceof SlskdError && error.status === 0
+
+async function runJob(jobId: string): Promise<'done' | 'waiting'> {
   const job = store.getJob(jobId)
-  if (!job || job.status !== 'queued') return
+  if (!job || job.status !== 'queued') return 'done'
   store.patchJob(jobId, { status: 'searching', started_at: job.started_at ?? Date.now(), error: null, next_retry_at: null })
   try {
     const target = store.jobTarget(job)
@@ -177,15 +185,16 @@ async function runJob(jobId: string) {
     else if (job.kind === 'album') await searchAlbum(job, target)
     else await searchTracks(job, target, wantedTracks(target), false)
   } catch (error) {
-    if (!stillActive(jobId)) return
-    if (!soulseekReady()) {
+    if (!stillActive(jobId)) return 'done'
+    if (!soulseekReady() || slskdDidntAnswer(error)) {
       store.patchJob(jobId, { status: 'queued' })
-      store.setPhase(jobId, 'Waiting for the Soulseek connection')
-      return
+      store.setPhase(jobId, soulseekReady() ? 'Waiting for slskd to answer' : 'Waiting for the Soulseek connection')
+      return 'waiting'
     }
     log.error(`Job ${jobId} failed`, error)
     await toWanted(jobId, errorMessage(error))
   }
+  return 'done'
 }
 
 async function runSearch(jobId: string, query: string) {

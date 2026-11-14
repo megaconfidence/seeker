@@ -4,10 +4,14 @@ import { logger } from '../log.ts'
 const log = logger('slskd')
 
 export class SlskdError extends Error {
+  // 0 when slskd didn't answer at all.
   status: number
-  constructor(message: string, status: number) {
+  // slskd was reached but didn't answer in time, as happens while it scans a big share.
+  timedOut: boolean
+  constructor(message: string, status: number, timedOut = false) {
     super(message)
     this.status = status
+    this.timedOut = timedOut
   }
 }
 
@@ -77,7 +81,8 @@ async function request<T>(method: string, path: string, body?: unknown, timeoutM
       signal: AbortSignal.timeout(timeoutMs),
     })
   } catch (error) {
-    throw new SlskdError(`slskd unreachable at ${config.slskdUrl}: ${(error as Error).message}`, 0)
+    const timedOut = (error as Error).name === 'TimeoutError'
+    throw new SlskdError(`slskd unreachable at ${config.slskdUrl}: ${(error as Error).message}`, 0, timedOut)
   }
   if (!response.ok) {
     const text = await response.text().catch(() => '')
@@ -98,17 +103,9 @@ export const slskd = {
 
   connect: () => request<void>('PUT', 'server', undefined, 15_000),
 
-  // Starts a rescan of slskd's shared folders. 409 means a scan is already running.
-  rescanShares: async (): Promise<boolean> => {
-    try {
-      await request<void>('PUT', 'shares', undefined, 15_000)
-      return true
-    } catch (error) {
-      if (error instanceof SlskdError && error.status === 409) return true
-      log.warn('Could not start a share rescan', error)
-      return false
-    }
-  },
+  // Starts a rescan of slskd's shared folders and returns at once; slskd scans in the background.
+  // Throws a 409 SlskdError when a scan is already running (see server/shares.ts).
+  rescanShares: () => request<void>('PUT', 'shares', undefined, 15_000),
 
   options: () =>
     request<{ soulseek?: { username?: string }; directories?: { downloads?: string } }>('GET', 'options', undefined, 8000),

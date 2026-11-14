@@ -3,12 +3,12 @@ import clsx from 'clsx'
 import { ArrowDown, ArrowUp, Copy, ExternalLink, KeyRound, LogOut, Trash2 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import type { ApiToken, QualityFormat, RecordType, Settings } from '../../../shared/types.ts'
+import type { ApiToken, AppStatus, QualityFormat, RecordType, Settings } from '../../../shared/types.ts'
 import { Skeleton } from '../components/skeleton.tsx'
 import { Badge, Button, Field, IconButton, Input, PageHeader, Select, Toggle } from '../components/ui.tsx'
 import { api } from '../lib/api.ts'
 import { useConfirm } from '../lib/confirm.tsx'
-import { relativeTime } from '../lib/format.ts'
+import { clockTime, minutesLabel, relativeTime } from '../lib/format.ts'
 import { useStatus } from '../lib/live.ts'
 import { useToast } from '../lib/toast.tsx'
 
@@ -107,6 +107,29 @@ interface Info {
   version: string
   acoustidFromEnv: boolean
   searchBudget: { used: number; limit: number; waiting: number }
+}
+
+function sharingHint(status: AppStatus | undefined, settings: Settings): string {
+  const rescan = status?.shareRescan
+  if (status?.slskd.sharedFiles === 0) {
+    return 'You aren’t sharing anything. Many Soulseek users won’t send files to people who don’t share. Check that slskd shares your music folder.'
+  }
+  if (rescan?.running || status?.slskd.scanningShares) {
+    return 'slskd is rescanning its shares. On a big library this takes minutes, and slskd may not respond meanwhile.'
+  }
+  if (rescan?.scheduledAt) return `New music will be shared after slskd rescans, at about ${clockTime(rescan.scheduledAt)}.`
+  if (rescan?.waitingForDownloads) return 'New music will be shared after slskd rescans, once the downloads in progress finish.'
+  if (rescan?.pending && !settings.shares.autoRescan) return 'New music isn’t shared yet. Press Rescan, or let slskd’s own rescans pick it up.'
+  return settings.shares.autoRescan
+    ? 'Seeker asks slskd to rescan once new music has stopped arriving, so what you download gets shared back.'
+    : 'Seeker doesn’t ask slskd to rescan by itself. Press Rescan to share new music.'
+}
+
+const QUIET_MINUTES = [5, 15, 30, 60, 180, 360, 1440]
+
+function quietOptions(current: number) {
+  const minutes = QUIET_MINUTES.includes(current) ? QUIET_MINUTES : [...QUIET_MINUTES, current].sort((a, b) => a - b)
+  return minutes.map((value) => ({ value: String(value), label: `After ${minutesLabel(value)}` }))
 }
 
 function useSettings() {
@@ -351,8 +374,8 @@ export function SettingsPage() {
     onError: (error) => toast(error.message, 'error'),
   })
   const rescanShares = useMutation({
-    mutationFn: () => api.post('/slskd/rescan'),
-    onSuccess: () => toast('slskd is rescanning your shared folders'),
+    mutationFn: () => api.post<{ started: boolean }>('/slskd/rescan'),
+    onSuccess: (result) => toast(result.started ? 'slskd is rescanning your shared folders' : 'slskd is already rescanning your shared folders'),
     onError: (error) => toast(error.message, 'error'),
   })
 
@@ -404,14 +427,7 @@ export function SettingsPage() {
               <Badge tone="bad">Can’t reach slskd</Badge>
             )}
           </Field>
-          <Field
-            label="Sharing"
-            hint={
-              sharing === 0
-                ? 'You aren’t sharing anything. Many Soulseek users won’t send files to people who don’t share. Check that slskd shares your music folder.'
-                : 'Seeker asks slskd to rescan after new music arrives, so what you download gets shared back.'
-            }
-          >
+          <Field label="Sharing" hint={sharingHint(status, settings)}>
             {sharing === null || sharing === undefined ? (
               <Badge>Unknown</Badge>
             ) : slskd?.scanningShares ? (
@@ -425,6 +441,19 @@ export function SettingsPage() {
             <Button size="sm" variant="ghost" loading={rescanShares.isPending} disabled={!slskd?.reachable || slskd.scanningShares} onClick={() => rescanShares.mutate()}>
               Rescan
             </Button>
+          </Field>
+          <Field
+            label="Rescan shares automatically"
+            hint="Seeker asks slskd to rescan once new music has stopped arriving for this long and nothing is downloading. On a big library a rescan can take minutes, and slskd may not respond meanwhile."
+          >
+            {settings.shares.autoRescan && (
+              <Select
+                value={String(settings.shares.quietMinutes)}
+                onChange={(value) => save.mutate({ shares: { quietMinutes: Number(value) } })}
+                options={quietOptions(settings.shares.quietMinutes)}
+              />
+            )}
+            <Toggle checked={settings.shares.autoRescan} onChange={(value) => save.mutate({ shares: { autoRescan: value } })} label="Rescan shares automatically" />
           </Field>
           {budget && (
             <Field

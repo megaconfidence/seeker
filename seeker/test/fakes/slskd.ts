@@ -202,7 +202,12 @@ export class FakeSlskd {
   readonly browses: { username: string; directory: string }[] = []
   readonly cancellations: Cancellation[] = []
   readonly requests: RequestRecord[] = []
+  // Share scans started by PUT /shares, and PUTs refused with 409 because one was running.
   shareRescans = 0
+  shareRescanConflicts = 0
+  // How long a share scan takes. While one runs, GET application reports shares.scanning.
+  shareScanMs = 0
+  #scanningUntil = 0
   #server: http.Server
   #lock: Promise<unknown> = Promise.resolve()
   #token = 1
@@ -299,7 +304,12 @@ export class FakeSlskd {
       return send(200, { soulseek: { username: 'tester' }, directories: { downloads: this.downloadsDir } })
     }
     if (method === 'PUT' && resource === 'shares' && !a) {
+      if (this.scanningShares) {
+        this.shareRescanConflicts++
+        return send(409, 'A share scan is already in progress')
+      }
       this.shareRescans++
+      this.startShareScan(this.shareScanMs)
       return send(204)
     }
     if (resource === 'searches') return this.#searches(method, a, b, body, send)
@@ -320,8 +330,17 @@ export class FakeSlskd {
         isLoggedIn: true,
         isTransitioning: false,
       },
-      shares: { scanning: false, directories: 1, files: 42 },
+      shares: { scanning: this.scanningShares, directories: 1, files: 42 },
     }
+  }
+
+  // A share scan, as if started from slskd's own interface or its rescan schedule.
+  startShareScan(ms: number) {
+    this.#scanningUntil = Math.max(this.#scanningUntil, Date.now() + ms)
+  }
+
+  get scanningShares(): boolean {
+    return Date.now() < this.#scanningUntil
   }
 
   // ---------- searches ----------

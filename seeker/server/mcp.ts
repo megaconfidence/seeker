@@ -31,7 +31,8 @@ import { getSettings, updateSettings } from './settings.ts'
 import { getManualSearch, startManualSearch } from './soulseek/manual.ts'
 import { searchBudget } from './soulseek/search.ts'
 import { slskd } from './soulseek/slskd.ts'
-import { appStatus, scheduleShareRescan } from './status.ts'
+import { rescanSharesNow } from './shares.ts'
+import { appStatus } from './status.ts'
 import { errorMessage, sleep } from './util.ts'
 import { checkArtist, checkDueArtists, listWatchlist, unwatchArtist, updateWatch, watchArtist } from './watchlist.ts'
 
@@ -891,7 +892,13 @@ function buildServer(): McpServer {
 
   server.registerTool(
     'get_settings',
-    { title: 'Settings', description: 'Quality, file naming, download checks, Jellyfin, watchlist and wishlist settings. Keys are shown as set or not set.', inputSchema: {}, annotations: local },
+    {
+      title: 'Settings',
+      description:
+        'Quality, file naming, download checks, Jellyfin, watchlist, wishlist and share rescan settings. Keys are shown as set or not set.',
+      inputSchema: {},
+      annotations: local,
+    },
     async () => guard(async () => ok(maskedSettings(getSettings()))),
   )
 
@@ -900,7 +907,7 @@ function buildServer(): McpServer {
     {
       title: 'Change settings',
       description:
-        'Change any settings; only the fields you pass change. quality.formats is the preferred format order. naming.template uses {albumartist} {artist} {album} {year} {track} {disctrack} {title}.',
+        'Change any settings; only the fields you pass change. quality.formats is the preferred format order. naming.template uses {albumartist} {artist} {album} {year} {track} {disctrack} {title}. shares.autoRescan and shares.quietMinutes control the share rescan Seeker asks slskd for once the library has stopped changing; turn it off for big libraries where rescans make slskd unresponsive.',
       inputSchema: settingsSchema.shape,
     },
     async (patch) =>
@@ -946,11 +953,16 @@ function buildServer(): McpServer {
 
   server.registerTool(
     'rescan_shares',
-    { title: 'Rescan shared folders', description: 'Ask slskd to rescan the folders it shares on Soulseek.', inputSchema: {} },
+    {
+      title: 'Rescan shared folders',
+      description:
+        'Ask slskd to rescan the folders it shares on Soulseek, right away. On a big library this can take minutes, and slskd may not respond meanwhile. Seeker also asks by itself once new music has stopped arriving (settings: shares).',
+      inputSchema: {},
+    },
     async () =>
       guard(async () => {
-        scheduleShareRescan(0)
-        return ok({ ok: true }, 'slskd is rescanning its shares.')
+        const result = await rescanSharesNow()
+        return ok(result, result.message)
       }),
   )
 

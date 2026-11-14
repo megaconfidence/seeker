@@ -9,8 +9,8 @@ import { queueAlbum, queueMbAlbum } from '../jobs/engine.ts'
 import { removeEmptyDirs } from '../post/fsops.ts'
 import { getSettings } from '../settings.ts'
 import { toCandidate } from '../soulseek/files.ts'
+import { noteLibraryChange } from '../shares.ts'
 import { qualityOf } from '../soulseek/quality.ts'
-import { scheduleShareRescan } from '../status.ts'
 import { rebuildOwnedIndex } from './owned.ts'
 import { AUDIO_EXTENSIONS, libraryCounts, scanLibrary } from './scan.ts'
 
@@ -41,7 +41,7 @@ async function tidy(dirs: Set<string>) {
 
 function changed() {
   rebuildOwnedIndex()
-  scheduleShareRescan()
+  noteLibraryChange()
   scheduleJellyfinRefresh()
   emit({ type: 'library', ...libraryCounts(), scanning: false })
 }

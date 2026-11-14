@@ -357,10 +357,22 @@ export interface SlskdStatus {
   scanningShares: boolean
 }
 
+// Seeker's own share rescans (see server/shares.ts).
+export interface ShareRescanStatus {
+  // When Seeker will next ask slskd to rescan its shares.
+  scheduledAt: number | null
+  // The library changed since the last rescan Seeker asked for.
+  pending: boolean
+  waitingForDownloads: boolean
+  // A rescan is running, Seeker's or slskd's own.
+  running: boolean
+}
+
 export interface AppStatus {
   version: string
   commit: string | null
   slskd: SlskdStatus
+  shareRescan: ShareRescanStatus
   jobs: { active: number; wanted: number; failed: number }
   library: { albums: number; tracks: number; scanning: boolean }
 }
@@ -393,6 +405,12 @@ export interface Settings {
   }
   wishlist: {
     enabled: boolean
+  }
+  shares: {
+    // Ask slskd to rescan its shares after new music arrives.
+    autoRescan: boolean
+    // How long no new music must arrive (and nothing download) before that rescan.
+    quietMinutes: number
   }
 }
 

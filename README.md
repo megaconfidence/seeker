@@ -177,6 +177,7 @@ Everything else is in **Settings** in the app:
 | Jellyfin | Server address and API key, so Jellyfin rescans after new music arrives | Off |
 | Watchlist | How often to check followed artists, and which release types count | Every 12 hours; albums and EPs |
 | Wishlist | Keep retrying downloads that can't be found yet | On |
+| Sharing | Ask slskd to rescan its shares once new music has stopped arriving and nothing is downloading | On, after 30 minutes |
 
 ## How a download works
 
@@ -185,7 +186,8 @@ Everything else is in **Settings** in the app:
    the user is.
 3. It downloads the best folder. If a user stalls or a file fails, it moves to the next best copy.
 4. Each file is checked, tagged with details from the catalog and MusicBrainz, and moved into your library.
-5. slskd rescans your shares, and Jellyfin rescans its library if you set it up.
+5. Jellyfin rescans its library if you set it up. Once no new music has arrived for a while and nothing is
+   downloading, Seeker asks slskd to rescan its shares, once for the whole batch.
 
 If nothing is found, the download waits in the wishlist and is retried after 1 hour, then 4, 12 and 24 hours, then
 every 3 days.
@@ -292,6 +294,11 @@ rm -f /path/to/seeker-data/seeker.db-wal /path/to/seeker-data/seeker.db-shm
   your library. Run it as the same user as slskd, and make sure that user can write to your music folder. Folders that
   Docker created for you belong to root. If Seeker isn't allowed to change a downloaded file but can change its folder,
   it tags a copy instead; if it can't change either, it files nothing and says so.
+- **slskd stops responding for minutes after downloads**: rescanning a big library's shares, especially on a network
+  share, keeps slskd busy. Make Seeker wait longer before it asks, or turn off **Rescan shares automatically** in
+  **Settings → Soulseek** and let slskd rescan on a schedule with `SLSKD_SHARE_CACHE_RETENTION` (in minutes; see
+  [share cache](https://github.com/slskd/slskd/blob/master/docs/config.md#cache) in slskd's docs). New music is then shared
+  after slskd's next rescan, or when you press **Rescan**. Downloads that start while slskd is busy wait for it.
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.

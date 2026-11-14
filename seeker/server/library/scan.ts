@@ -7,7 +7,7 @@ import { all, exec, get, transaction } from '../db.ts'
 import { emit } from '../events.ts'
 import { logger } from '../log.ts'
 import { normalize, stripExtras } from '../match/normalize.ts'
-import { scheduleShareRescan } from '../status.ts'
+import { noteLibraryChange } from '../shares.ts'
 import { rebuildOwnedIndex } from './owned.ts'
 
 const log = logger('library')
@@ -300,7 +300,7 @@ export async function scanLibrary(): Promise<void> {
     }
     await rebuildAlbums()
     rebuildOwnedIndex()
-    if (changed || removed) scheduleShareRescan()
+    if (changed || removed) noteLibraryChange()
     log.info(`Library scan: ${files.length} files, ${changed} updated, ${removed} removed in ${Date.now() - started} ms`)
   } catch (error) {
     log.error('Library scan failed', error)
@@ -332,7 +332,7 @@ export async function scanFiles(files: string[]): Promise<void> {
   }
   if (albumIds.size) await rebuildAlbums(albumIds)
   rebuildOwnedIndex()
-  scheduleShareRescan()
+  noteLibraryChange()
   announce()
 }
 

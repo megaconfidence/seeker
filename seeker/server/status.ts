@@ -4,6 +4,7 @@ import { emit } from './events.ts'
 import { statusCounts } from './jobs/store.ts'
 import { isScanning, libraryCounts } from './library/scan.ts'
 import { logger } from './log.ts'
+import { noteLibraryChange, noteSlskdShares, onShareRescanChange, shareRescanStatus } from './shares.ts'
 import { slskd } from './soulseek/slskd.ts'
 import { errorMessage } from './util.ts'
 
@@ -44,24 +45,16 @@ export function appStatus(): AppStatus {
     version: config.version,
     commit: config.commit || null,
     slskd: current,
+    shareRescan: shareRescanStatus(),
     jobs: statusCounts(),
     library: { ...libraryCounts(), scanning: isScanning() },
   }
 }
 
-let rescanTimer: ReturnType<typeof setTimeout> | undefined
-
-// New music only shows up in slskd's shares after a rescan; batch them up.
-export function scheduleShareRescan(delayMs = 60_000) {
-  clearTimeout(rescanTimer)
-  rescanTimer = setTimeout(async () => {
-    if (await slskd.rescanShares()) log.info('Asked slskd to rescan its shared folders')
-    void poll()
-  }, delayMs)
-  rescanTimer.unref()
-}
+onShareRescanChange(() => emit({ type: 'status', status: appStatus() }))
 
 async function poll() {
+  const at = Date.now()
   let next: SlskdStatus
   try {
     const app = await slskd.application()
@@ -81,15 +74,17 @@ async function poll() {
       scanningShares: !!app.shares?.scanning,
     }
     failures = 0
+    noteSlskdShares({ reachable: true, scanning: next.scanningShares, at })
     // slskd only scans shares at startup; if it shares nothing but the library has music, rescan.
     if (!checkedShares) {
       checkedShares = true
-      if (next.sharedFiles === 0 && !next.scanningShares && libraryCounts().tracks > 0) scheduleShareRescan(1000)
+      if (next.sharedFiles === 0 && !next.scanningShares && libraryCounts().tracks > 0) noteLibraryChange()
     }
   } catch (error) {
     failures++
     if (failures === 1) log.warn(`Cannot reach slskd: ${errorMessage(error)}`)
     next = offline(errorMessage(error))
+    noteSlskdShares({ reachable: false, scanning: false, at })
   }
   const changed = JSON.stringify(next) !== JSON.stringify(current)
   const becameReady = next.loggedIn && !current.loggedIn
@@ -103,5 +98,5 @@ async function poll() {
 
 export function startStatus() {
   void poll()
-  setInterval(() => void poll(), 10_000).unref()
+  setInterval(() => void poll(), config.timing.statusMs).unref()
 }

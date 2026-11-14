@@ -67,6 +67,18 @@ export function relativeTime(timestamp: number | null | undefined): string {
   return ''
 }
 
+// "14:30", in the browser's locale.
+export function clockTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+// 30 → "30 minutes", 60 → "1 hour", 1440 → "24 hours".
+export function minutesLabel(minutes: number): string {
+  if (minutes >= 60 && minutes % 60 === 0) return plural(minutes / 60, 'hour')
+  if (minutes >= 1) return plural(Math.round(minutes), 'minute')
+  return plural(Math.round(minutes * 60), 'second')
+}
+
 export function timeLeft(seconds: number | null | undefined): string {
   if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return ''
   if (seconds < 60) return 'under a minute left'

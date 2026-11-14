@@ -54,7 +54,8 @@ import { getManualSearch, startManualSearch } from './soulseek/manual.ts'
 import { searchBudget } from './soulseek/search.ts'
 import { slskd } from './soulseek/slskd.ts'
 import { choiceSchema, recordTypes, settingsSchema } from './schemas.ts'
-import { appStatus, scheduleShareRescan } from './status.ts'
+import { rescanSharesNow } from './shares.ts'
+import { appStatus } from './status.ts'
 import { checkArtist, checkDueArtists, listWatchlist, unwatchArtist, updateWatch, watchArtist } from './watchlist.ts'
 
 // The login rate limit goes by the connecting address. X-Forwarded-For is ignored on purpose:
@@ -140,10 +141,7 @@ export function apiRoutes() {
     await slskd.connect()
     return c.json({ ok: true })
   })
-  api.post('/slskd/rescan', (c) => {
-    scheduleShareRescan(0)
-    return c.json({ ok: true })
-  })
+  api.post('/slskd/rescan', async (c) => c.json(await rescanSharesNow()))
 
   api.get('/info', (c) =>
     c.json({

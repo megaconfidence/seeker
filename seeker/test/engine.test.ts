@@ -102,6 +102,7 @@ Object.assign(process.env, {
   SEEKER_SEARCH_GAP_MS: '1',
   SEEKER_SEARCH_IDLE_MS: '1000',
   SEEKER_LOCATE_MS: '2000',
+  SEEKER_STATUS_MS: '300',
   SEEKER_LOG_LEVEL: process.env.SEEKER_LOG_LEVEL || 'error',
 })
 // AcoustID would call api.acoustid.org; it's off when no key is configured anywhere.
@@ -120,13 +121,6 @@ const localFetch: typeof fetch = (input, init) => {
 }
 Object.assign(globalThis, { fetch: localFetch })
 
-// scheduleShareRescan() waits 60 s before asking slskd to rescan its shares. Run that one timer after
-// 100 ms instead, so the PUT /shares it sends can be asserted; every other timer is left alone.
-const realSetTimeout = globalThis.setTimeout
-const quickRescan = ((callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) =>
-  realSetTimeout(callback, String(callback).includes('rescanShares') ? 100 : ms, ...args)) as unknown as typeof setTimeout
-Object.assign(globalThis, { setTimeout: quickRescan })
-
 const { startStatus, soulseekReady } = await import('../server/status.ts')
 const engine = await import('../server/jobs/engine.ts')
 const store = await import('../server/jobs/store.ts')
@@ -142,6 +136,8 @@ updateSettings({
   // ffmpeg is installed, so the duration, decode and fake-lossless checks all run for real.
   checks: { duration: true, integrity: true, fakeLossless: true, acoustidKey: '' },
   wishlist: { enabled: true },
+  // Share rescans wait for the library to be quiet for 300 ms instead of 30 minutes.
+  shares: { autoRescan: true, quietMinutes: 0.005 },
 })
 rebuildOwnedIndex()
 startStatus()

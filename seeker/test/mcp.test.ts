@@ -158,6 +158,19 @@ test('settings: read with keys masked, change one field, reject bad values', asy
   const bad = await call('update_settings', { naming: { template: '{artist}/{album}' } })
   assert.equal(bad.isError, true)
   assert.match(bad.text, /\{title\}/)
+
+  assert.deepEqual(before.data.shares, { autoRescan: true, quietMinutes: 30 })
+  const shares = await call('update_settings', { shares: { autoRescan: false } })
+  assert.deepEqual(shares.data.shares, { autoRescan: false, quietMinutes: 30 })
+})
+
+test('rescan_shares asks slskd to rescan right away', async () => {
+  const before = slskd.shareRescans
+  const result = await call('rescan_shares')
+  assert.equal(result.isError, false, result.text)
+  assert.equal(result.data.started, true)
+  assert.equal(slskd.shareRescans, before + 1)
+  assert.equal((await call('get_status')).data.shareRescan.running, true)
 })
 
 test('tokens: create, list, revoke', async () => {

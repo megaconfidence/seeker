@@ -33,6 +33,7 @@ seeker/
     db.ts                   SQLite (node:sqlite) and migrations
     settings.ts, config.ts  Saved settings with defaults; environment variables
     folders.ts              Folder checks (fatal for /data), user ids as the host sees them, permission messages
+    shares.ts               When to ask slskd to rescan its shares (quiet period, downloads, 409s, slskd's own scans)
     status.ts, watchlist.ts, jellyfin.ts, backup.ts, auth.ts, log.ts
   web/src/                  React 19 + Vite + Tailwind CSS v4 + TanStack Query + React Router
     pages/                  One file per page
@@ -126,7 +127,14 @@ reporting the last commit that built an image.
   downloading.
 - slskd only knows a download's place in the remote queue when asked:
   `GET transfers/downloads/{user}/{id}/position`. The engine asks once a minute.
-- slskd only rescans its shares on `PUT shares`. Seeker schedules a rescan after library changes.
+- slskd only rescans its shares on `PUT shares` (or on its own `SLSKD_SHARE_CACHE_RETENTION` schedule). The PUT
+  returns at once and the scan runs in the background; 409 means a scan is already running. On a big library,
+  especially a network share, a scan can keep slskd from answering for minutes (a 5,000-file NFS library took 7–9).
+  So never ask for a rescan per import: report library changes with `noteLibraryChange()` and let `server/shares.ts`
+  ask once the library has been quiet for `shares.quietMinutes` and nothing is downloading. A scan that was already
+  running may have missed new music, so it asks again afterwards.
+- A search that fails because slskd didn't answer (a `SlskdError` with status 0) sends the download back to the queue
+  to wait for slskd, never to the wishlist.
 - A Soulseek account allows one session. Signing in elsewhere logs slskd out.
 
 ## Other things that have bitten us
@@ -161,6 +169,9 @@ reporting the last commit that built an image.
   ffmpeg (seeded noise; the fake FLAC is a real MP3 round trip).
 - `test/mcp.test.ts`: the MCP server through the official client, with no socket. It checks the full tool list,
   progress fields, settings masking and tokens.
+- `test/shares.test.ts`: share rescans against the fake slskd, which can simulate a scan in progress (409s).
+- `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
+  folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.
 - `SEEKER_LOG_LEVEL=info` shows the server log during tests; `SEEKER_TEST_KEEP=1` keeps the temporary folders.
 

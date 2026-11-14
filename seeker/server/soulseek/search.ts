@@ -139,9 +139,11 @@ export async function searchSoulseek(query: string, options: SearchOptions = {})
       }
     }
     // slskd flags the search complete a moment before it has stored the responses, so a large
-    // result set can briefly read as empty.
+    // result set can briefly read as empty. When slskd doesn't answer at all, that's not "no
+    // results": the error goes up so the download waits for slskd instead.
     const fetchResponses = () =>
       slskd.searchResponses(id).catch((error) => {
+        if (error instanceof SlskdError && error.status === 0) throw error
         log.warn('Could not fetch search responses', error)
         return [] as SlskdResponse[]
       })
