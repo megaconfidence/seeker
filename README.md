@@ -129,7 +129,6 @@ Environment variables:
 | `SLSKD_URL` | slskd's address, as Seeker reaches it | `http://slskd:5030` |
 | `SLSKD_API_KEY` | slskd API key that can make changes | |
 | `ACOUSTID_API_KEY` | Optional: fingerprint every download | |
-| `SEEKER_TRUST_PROXY` | `true` if Seeker can only be reached through a reverse proxy that sets `X-Forwarded-For` | `false` |
 | `TZ` | Time zone | `UTC` |
 
 Folders, which Seeker must be able to write to:

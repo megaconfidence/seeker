@@ -56,14 +56,9 @@ import { choiceSchema, recordTypes, settingsSchema } from './schemas.ts'
 import { appStatus, scheduleShareRescan } from './status.ts'
 import { checkArtist, checkDueArtists, listWatchlist, unwatchArtist, updateWatch, watchArtist } from './watchlist.ts'
 
-// Only believe X-Forwarded-For behind a reverse proxy we were told about; otherwise anyone could
-// send a new address with every login attempt and dodge the rate limit. The proxy appends the
-// real client address, so take the last entry.
+// The login rate limit goes by the connecting address. X-Forwarded-For is ignored on purpose:
+// anyone could send a new one with every attempt and dodge the limit.
 function clientIp(c: Context): string {
-  if (config.trustProxy) {
-    const forwarded = c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim()
-    if (forwarded) return forwarded
-  }
   try {
     return getConnInfo(c).remote.address ?? 'unknown'
   } catch {

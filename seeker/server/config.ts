@@ -20,8 +20,6 @@ export const config = {
   musicDir: path.resolve(env('SEEKER_MUSIC_DIR', '/music')),
   importDir: path.resolve(env('SEEKER_IMPORT_DIR', '/import')),
   password: env('SEEKER_PASSWORD'),
-  // Set when Seeker sits behind a reverse proxy (Caddy, Traefik…) that sets X-Forwarded-For.
-  trustProxy: /^(1|true|yes)$/i.test(env('SEEKER_TRUST_PROXY')),
   acoustidKey: env('ACOUSTID_API_KEY'),
   slskdUrl: env('SLSKD_URL', 'http://slskd:5030').replace(/\/+$/, ''),
   slskdApiKey: env('SLSKD_API_KEY'),
