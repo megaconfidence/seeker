@@ -13,6 +13,7 @@ library, ready for Jellyfin or any other player. An AI assistant can do all of t
 ## Contents
 
 - [Features](#features)
+- [What Seeker is not](#what-seeker-is-not)
 - [Screenshots](#screenshots)
 - [Install](#install)
   - [Set up slskd](#set-up-slskd)
@@ -26,6 +27,7 @@ library, ready for Jellyfin or any other player. An AI assistant can do all of t
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
   - [Releases](#releases)
+- [Licence](#licence)
 
 ## Features
 
@@ -46,6 +48,12 @@ library, ready for Jellyfin or any other player. An AI assistant can do all of t
 - **Import.** Add music you already have: Seeker matches each folder to an album, tags it and files it.
 - **Shares back.** When slskd shares your music folder, new music is shared on Soulseek automatically.
 - **MCP server.** Everything in the app can be done and read by an AI assistant.
+
+## What Seeker is not
+
+Seeker is a focused Soulseek downloader, not a full SoulSync replacement or a media server. It has no playlists,
+discovery feed, multi-user profiles, video, podcasts, torrent/Usenet downloads or Lidarr integration. Music downloads
+come from Soulseek through slskd, not Spotify or Tidal; Deezer and MusicBrainz supply metadata.
 
 ## Screenshots
 
@@ -216,6 +224,10 @@ that isn't mounted looks just like that. If you did remove the music, press **Re
 An entirely empty music folder is guarded even for small libraries. Unreadable files and folders keep their indexed
 tracks; a forced rescan never treats those access failures as deletions.
 
+**Deletes are permanent.** Seeker has no recycle bin or undo for music files. Deleting a track or album removes its
+audio files, and upgrades permanently replace lower-quality copies after better files are filed. Back up your music
+before deleting or upgrading; the daily database backup does not contain audio.
+
 **Importing.** Put album folders in the import folder (`/import`) and open **Library → Import music**. For each folder,
 Seeker suggests matching albums and shows how many files fit. Choose one to tag the files and file them in your
 library, either copying them or moving them. Folders that don't match anything can be imported with their own tags.
@@ -365,5 +377,9 @@ published, and changes that only touch documentation (Markdown files and `docs/`
 workflow. A fork publishes to `ghcr.io/<its-owner>/seeker`.
 
 ---
+
+## Licence
+
+Seeker is available under the [MIT licence](LICENSE). Third-party dependencies keep their own licences.
 
 Only download music you have the right to.

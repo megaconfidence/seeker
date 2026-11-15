@@ -690,8 +690,9 @@ function buildServer(): McpServer {
     'upgrade_library_album',
     {
       title: 'Find a better copy',
-      description: 'Download a better-quality copy of a library album (by your quality settings) and replace the old files.',
+      description: 'Download a better-quality copy of a library album (by your quality settings) and permanently replace the old files. There is no recycle bin; back up music before upgrading.',
       inputSchema: { library_album_id: z.string() },
+      annotations: destructive,
     },
     async ({ library_album_id }) => guard(async () => ok(compactJob(await upgradeLibraryAlbum(library_album_id)), 'Looking for a better copy.')),
   )
@@ -732,7 +733,7 @@ function buildServer(): McpServer {
     'delete_library_album',
     {
       title: 'Delete an album',
-      description: 'Delete an album’s files from the music folder. This can’t be undone.',
+      description: 'Permanently delete an album’s files from the music folder. There is no recycle bin and this can’t be undone.',
       inputSchema: { library_album_id: z.string() },
       annotations: destructive,
     },
@@ -743,7 +744,7 @@ function buildServer(): McpServer {
     'delete_library_track',
     {
       title: 'Delete a song',
-      description: 'Delete one song’s file from the music folder (track ids come from get_library_album or search_library). This can’t be undone.',
+      description: 'Permanently delete one song’s file from the music folder (track ids come from get_library_album or search_library). There is no recycle bin and this can’t be undone.',
       inputSchema: { track_id: z.number().int() },
       annotations: destructive,
     },

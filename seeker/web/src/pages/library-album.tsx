@@ -105,10 +105,20 @@ export function LibraryAlbumPage() {
     toast('Re-tagging and filing the album', { action: viewJob(job) })
   }
 
+  const upgradeAlbum = async () => {
+    const yes = await confirm({
+      title: `Find a better copy of ${album.title}?`,
+      description: 'Better files permanently replace the lower-quality copies after downloading. There is no recycle bin. Back up your music first.',
+      confirmLabel: 'Find a better copy',
+      tone: 'danger',
+    })
+    if (yes) upgrade.mutate()
+  }
+
   const deleteAlbum = async () => {
     const yes = await confirm({
       title: `Delete ${album.title}?`,
-      description: `This deletes ${plural(tracks.length, 'file')} from your music folder. It can’t be undone.`,
+      description: `This permanently deletes ${plural(tracks.length, 'file')} from your music folder. There is no recycle bin and it can’t be undone.`,
       confirmLabel: 'Delete album',
       tone: 'danger',
     })
@@ -118,7 +128,7 @@ export function LibraryAlbumPage() {
   const deleteTrack = async (track: LibraryTrack) => {
     const yes = await confirm({
       title: `Delete ${track.title}?`,
-      description: 'This deletes the file from your music folder. It can’t be undone.',
+      description: 'This permanently deletes the file from your music folder. There is no recycle bin and it can’t be undone.',
       confirmLabel: 'Delete song',
       tone: 'danger',
     })
@@ -165,7 +175,7 @@ export function LibraryAlbumPage() {
                     : canUpgrade
                       ? 'Download a better-quality copy and replace these files'
                       : 'Already in your preferred quality',
-                  onSelect: () => upgrade.mutate(),
+                  onSelect: () => void upgradeAlbum(),
                 },
                 { label: 'Match to album…', icon: <Link2 />, onSelect: () => setMatching(true) },
                 { label: 'Delete album', icon: <Trash2 />, tone: 'danger', onSelect: () => void deleteAlbum() },

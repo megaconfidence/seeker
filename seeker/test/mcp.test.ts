@@ -116,8 +116,12 @@ test('every web-app feature has an MCP tool', async () => {
     'wait_for_download',
     'watch_artist',
   ])
-  for (const name of ['delete_library_album', 'delete_library_track', 'revoke_token', 'remove_download']) {
+  for (const name of ['delete_library_album', 'delete_library_track', 'upgrade_library_album', 'revoke_token', 'remove_download']) {
     assert.equal(tools.find((tool) => tool.name === name)?.annotations?.destructiveHint, true, `${name} is marked destructive`)
+  }
+  for (const name of ['delete_library_album', 'delete_library_track', 'upgrade_library_album']) {
+    assert.match(tools.find((tool) => tool.name === name)?.description ?? '', /[Pp]ermanently/)
+    assert.match(tools.find((tool) => tool.name === name)?.description ?? '', /recycle bin/)
   }
 })
 

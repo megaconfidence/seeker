@@ -19,6 +19,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY server ./server
 COPY shared ./shared
+COPY LICENSE ./LICENSE
 COPY --from=build /app/web/dist ./web/dist
 COPY docker-entrypoint.sh /usr/local/bin/seeker-entrypoint
 RUN chmod 755 /usr/local/bin/seeker-entrypoint && mkdir -p /data && chown node:node /data
@@ -26,6 +27,7 @@ RUN chmod 755 /usr/local/bin/seeker-entrypoint && mkdir -p /data && chown node:n
 # a new commit doesn't invalidate the cached layers above.
 ARG SEEKER_COMMIT=""
 ENV SEEKER_COMMIT=$SEEKER_COMMIT
+LABEL org.opencontainers.image.licenses="MIT"
 EXPOSE 7335
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:7335/healthz >/dev/null || exit 1
 # The container starts as root so the entrypoint can give /data to PUID:PGID; Seeker itself then
