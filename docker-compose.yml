@@ -20,6 +20,9 @@ services:
     environment:
       # The user and group Seeker runs as. Use the same as slskd, so Seeker can move finished
       # downloads out of its folder. With rootless Docker, 0 means you, the user running Docker.
+      # Rootless Docker: 1000 gives ./seeker-data to a subordinate host id (e.g. 100999), so
+      # restoring or deleting data on the host needs sudo. Use PUID=0 and PGID=0 to manage it
+      # as yourself; make sure that identity can also access slskd's downloads and your music.
       PUID: 1000
       PGID: 1000
       SEEKER_PASSWORD: choose-a-password

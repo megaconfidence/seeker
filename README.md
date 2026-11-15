@@ -140,6 +140,10 @@ Every setting is listed under [Configuration](#configuration), for whichever way
 you run Seeker with `--user` or `user:` instead, it can't change who owns its data folder; when it can't write there,
 it stops and says which `chown` fixes it.
 
+The default `PUID=1000`/`PGID=1000` gives a bind-mounted data folder to subordinate host ids such as `100999:100999`.
+You can usually read the backups but need `sudo` to delete or restore files on the host. Use `PUID=0`/`PGID=0` if you
+want to manage that folder as yourself, and make sure that identity can also access the music and downloads.
+
 ## Configuration
 
 Environment variables:
@@ -281,6 +285,11 @@ your music. To restore, stop Seeker, copy a backup over `seeker.db` in the data 
 cp /path/to/seeker-data/backups/seeker-2026-11-12.db /path/to/seeker-data/seeker.db
 rm -f /path/to/seeker-data/seeker.db-wal /path/to/seeker-data/seeker.db-shm
 ```
+
+With rootless Docker and `PUID=1000`, the data folder belongs to a subordinate host id, so prefix both commands with
+`sudo`. The entrypoint restores `PUID:PGID` ownership when Seeker starts again. With `PUID=0`/`PGID=0`, the folder
+belongs to the user running rootless Docker and no `sudo` is needed. Changing to those ids also changes which music
+and download files Seeker can access; check their permissions before switching.
 
 ## Troubleshooting
 

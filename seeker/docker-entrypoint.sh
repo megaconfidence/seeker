@@ -3,6 +3,8 @@
 # it first gives Seeker's data folder to that user. That also covers rootless Docker, where users in
 # the container are other users on the host. When the container starts as another user (--user, or
 # user: in Compose), Seeker runs as that user and the folder is left as it is.
+# With rootless Docker, PUID=1000 can give a bind-mounted /data to host uid 100999: host-side
+# restoration then needs sudo. PUID=0/PGID=0 keeps it owned by the user running rootless Docker.
 set -eu
 
 if [ -n "${UMASK:-}" ]; then
