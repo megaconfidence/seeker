@@ -205,7 +205,8 @@ export function Layout({ children }: { children: ReactNode }) {
             <Search className="size-5" />
           </button>
         </header>
-        <main ref={main} className={clsx('scrollbar-thin min-h-0 flex-1 overflow-y-auto', current && 'pb-20')}>
+        {/* The player bar grows by the gesture bar's inset on phones, so the room kept for it does too. */}
+        <main ref={main} className={clsx('scrollbar-thin min-h-0 flex-1 overflow-y-auto', current && 'pb-[calc(5rem_+_env(safe-area-inset-bottom))]')}>
           {/* Keyed by page, so every navigation eases the new page in. */}
           <div key={location.pathname} className="mx-auto w-full max-w-295 animate-page-in px-4 py-6 md:px-8 md:py-8">
             {children}
