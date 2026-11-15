@@ -29,7 +29,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled || loading}
       className={clsx(
         'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-[background-color,opacity,color,scale] duration-150 select-none enabled:active:scale-[0.97]',
-        size === 'sm' ? 'h-7 px-2.5 text-[12.5px]' : 'h-8.5 px-3.5 text-[13px]',
+        size === 'sm' ? 'h-7 px-2.5 text-12.5' : 'h-8.5 px-3.5 text-13',
         buttonVariants[variant],
         className,
       )}
@@ -72,7 +72,7 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
     <input
       ref={ref}
       className={clsx(
-        'h-8.5 w-full rounded-md border border-line-strong bg-raised px-3 text-[13px] text-fg placeholder:text-subtle focus:border-fg/30 focus:outline-none',
+        'h-8.5 w-full rounded-md border border-line-strong bg-raised px-3 text-13 text-fg placeholder:text-subtle focus:border-fg/30 focus:outline-none',
         className,
       )}
       {...props}
@@ -107,7 +107,7 @@ export function Toggle({
       <span
         className={clsx(
           'inline-block size-4 rounded-full bg-inverse shadow-sm transition-transform',
-          checked ? 'translate-x-[18px]' : 'translate-x-0.5',
+          checked ? 'translate-x-4.5' : 'translate-x-0.5',
         )}
       />
     </button>
@@ -144,8 +144,8 @@ export function PageHeader({
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-1 text-[13px] text-muted">{subtitle}</p>}
+        <h1 className="text-22 font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 text-13 text-muted">{subtitle}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
@@ -168,7 +168,7 @@ export function Section({
   return (
     <section className={clsx('mb-10', className)}>
       <div className="mb-3 flex items-center justify-between gap-4">
-        <h2 className="text-[14px] font-semibold">
+        <h2 className="text-14 font-semibold">
           {title}
           {count !== undefined && <span className="ml-2 font-normal text-subtle tabular">{count}</span>}
         </h2>
@@ -184,7 +184,7 @@ export function Empty({ icon, title, children }: { icon?: ReactNode; title: stri
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-line-strong px-6 py-14 text-center">
       {icon && <div className="mb-3 text-subtle">{icon}</div>}
       <p className="font-medium">{title}</p>
-      {children && <div className="mt-1 max-w-sm text-[13px] text-muted">{children}</div>}
+      {children && <div className="mt-1 max-w-sm text-13 text-muted">{children}</div>}
     </div>
   )
 }
@@ -206,7 +206,7 @@ export function Tabs<T extends string>({
           type="button"
           onClick={() => onChange(option.value)}
           className={clsx(
-            'h-7 rounded px-3 text-[12.5px] font-medium transition-colors',
+            'h-7 rounded px-3 text-12.5 font-medium transition-colors',
             value === option.value ? 'bg-hover text-fg' : 'text-muted hover:text-fg',
           )}
         >
@@ -221,7 +221,7 @@ export function Badge({ children, tone = 'default', className }: { children: Rea
   return (
     <span
       className={clsx(
-        'inline-flex h-5 items-center gap-1 rounded px-1.5 text-[11.5px] font-medium whitespace-nowrap',
+        'inline-flex h-5 items-center gap-1 rounded px-1.5 text-11.5 font-medium whitespace-nowrap',
         tone === 'ok' && 'bg-ok/12 text-ok',
         tone === 'warn' && 'bg-warn/14 text-warn',
         tone === 'bad' && 'bg-bad/12 text-bad',
@@ -239,8 +239,8 @@ export function Field({ label, hint, children }: { label: string; hint?: ReactNo
   return (
     <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-8">
       <div className="min-w-0 sm:max-w-sm">
-        <div className="text-[13px] font-medium">{label}</div>
-        {hint && <div className="mt-0.5 text-[12.5px] text-muted">{hint}</div>}
+        <div className="text-13 font-medium">{label}</div>
+        {hint && <div className="mt-0.5 text-12.5 text-muted">{hint}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-2 sm:justify-end">{children}</div>
     </div>
@@ -263,7 +263,7 @@ export function Select<T extends string>({
       value={value}
       onChange={(event) => onChange(event.target.value as T)}
       className={clsx(
-        'h-8.5 rounded-md border border-line-strong bg-raised px-2.5 text-[13px] text-fg focus:border-fg/30 focus:outline-none',
+        'h-8.5 rounded-md border border-line-strong bg-raised px-2.5 text-13 text-fg focus:border-fg/30 focus:outline-none',
         className,
       )}
     >

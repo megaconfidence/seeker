@@ -106,7 +106,7 @@ export function Scrubber({ large = false }: { large?: boolean }) {
   const thick = large ? 'h-1.5' : active ? 'h-1.5' : 'h-1'
 
   return (
-    <div className={clsx('flex w-full items-center gap-2 text-subtle tabular', large ? 'flex-wrap text-[12px]' : 'text-[11px]')}>
+    <div className={clsx('flex w-full items-center gap-2 text-subtle tabular', large ? 'flex-wrap text-12' : 'text-11')}>
       {!large && <span className="w-9 text-right">{elapsed(second)}</span>}
       <div
         ref={bar}
@@ -142,7 +142,7 @@ export function Scrubber({ large = false }: { large?: boolean }) {
         />
         {hover && !dragging && !large && (
           <div
-            className="pointer-events-none absolute -top-7 -translate-x-1/2 rounded bg-fg px-1.5 py-0.5 text-[11px] font-medium text-inverse tabular shadow-sm"
+            className="pointer-events-none absolute -top-7 -translate-x-1/2 rounded bg-fg px-1.5 py-0.5 text-11 font-medium text-inverse tabular shadow-sm"
             style={{ left: hover.x }}
           >
             {elapsed(hover.seconds)}

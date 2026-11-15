@@ -60,22 +60,22 @@ export function MatchRow({
     >
       <Cover src={coverAt(candidate.cover, 250)} className={large ? 'size-16' : 'size-10'} rounded="sm" />
       <div className="min-w-0 flex-1">
-        <div className={clsx('flex items-center gap-2 truncate font-medium', large ? 'text-[15px]' : 'text-[13px]')}>
+        <div className={clsx('flex items-center gap-2 truncate font-medium', large ? 'text-15' : 'text-13')}>
           <span className="truncate">{candidate.title}</span>
           {candidate.source === 'musicbrainz' && <Badge className="shrink-0">MusicBrainz</Badge>}
         </div>
-        <div className="truncate text-[12.5px] text-muted">
+        <div className="truncate text-12.5 text-muted">
           {candidateMeta(candidate)}
           {candidate.owned === 'partial' && <span className="text-warn"> · Partly in library</span>}
         </div>
       </div>
       {owned ? (
-        <span className="flex shrink-0 items-center gap-1 text-[12px] text-ok">
+        <span className="flex shrink-0 items-center gap-1 text-12 text-ok">
           <Check className="size-3.5" /> In library
         </span>
       ) : selected ? (
-        <span className="flex shrink-0 items-center gap-1.5 text-[12px] text-muted">
-          <kbd className="inline-flex h-5 items-center rounded border border-line-strong px-1.5 font-sans text-[11px]">
+        <span className="flex shrink-0 items-center gap-1.5 text-12 text-muted">
+          <kbd className="inline-flex h-5 items-center rounded border border-line-strong px-1.5 font-sans text-11">
             <CornerDownLeft className="size-3" />
           </kbd>
           {candidate.owned === 'partial' ? 'Download missing' : 'Download'}

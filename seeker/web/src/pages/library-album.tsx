@@ -140,9 +140,9 @@ export function LibraryAlbumPage() {
       <div className="mb-8 flex flex-col gap-6 sm:flex-row sm:items-end">
         <Cover src={album.hasCover ? `${coverUrl(album.id)}?v=${album.addedAt}` : null} className="w-44 shadow-xl shadow-black/20 sm:w-56" />
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium text-muted">In your library</div>
-          <h1 className="mt-1 text-[28px] leading-tight font-semibold tracking-tight sm:text-[34px]">{album.title}</h1>
-          <div className="mt-2 text-[13.5px] text-muted">
+          <div className="text-12 font-medium text-muted">In your library</div>
+          <h1 className="mt-1 text-28 leading-tight font-semibold tracking-tight sm:text-34">{album.title}</h1>
+          <div className="mt-2 text-13.5 text-muted">
             <Link to={`/library?artist=${encodeURIComponent(album.artist)}`} className="font-medium text-fg hover:underline">
               {album.artist}
             </Link>
@@ -160,7 +160,8 @@ export function LibraryAlbumPage() {
             {catalogHref && (
               <Link to={catalogHref}>
                 <Button variant="ghost" icon={<Disc3 className="size-3.5" />}>
-                  Album page
+                  {/* Just the icon on a phone, so the buttons stay on one line. */}
+                  <span className="max-sm:sr-only">Album page</span>
                 </Button>
               </Link>
             )}
@@ -188,7 +189,7 @@ export function LibraryAlbumPage() {
       {(unsorted || !linked) && (
         <div className="mb-6 flex flex-col gap-3 rounded-lg border border-line bg-panel px-4 py-3 sm:flex-row sm:items-center">
           <TriangleAlert className="size-4 shrink-0 text-warn" />
-          <p className="min-w-0 flex-1 text-[13px] text-muted">
+          <p className="min-w-0 flex-1 text-13 text-muted">
             {unsorted
               ? 'Seeker couldn’t tell which album these files belong to. Match them to fix the tags, file names and cover.'
               : 'This album isn’t linked to the catalog, so Seeker can’t look for a better copy. Match it to link it.'}
@@ -207,15 +208,15 @@ export function LibraryAlbumPage() {
           const current = player.current?.key === `lib:${track.id}`
           return (
             <div key={track.id}>
-              {header && <div className="mt-4 mb-1 px-3 text-[12px] font-medium text-subtle first:mt-0">Disc {disc}</div>}
+              {header && <div className="mt-4 mb-1 px-3 text-12 font-medium text-subtle first:mt-0">Disc {disc}</div>}
               <div
                 onClick={() => player.play(queue, index)}
                 className={clsx(
-                  'group grid h-12 w-full cursor-pointer grid-cols-[28px_1fr_auto_auto_32px] items-center gap-3 rounded-md pr-1 pl-3 text-left hover:bg-hover',
+                  'group grid h-12 w-full cursor-pointer grid-cols-[1.75rem_1fr_auto_auto_2rem] items-center gap-3 rounded-md pr-1 pl-3 text-left hover:bg-hover',
                   current && 'bg-hover',
                 )}
               >
-                <span className="relative flex justify-center text-[12.5px] text-subtle tabular">
+                <span className="relative flex justify-center text-12.5 text-subtle tabular">
                   {current && player.playing ? (
                     <AudioLines className="size-4 text-accent" />
                   ) : (
@@ -236,11 +237,11 @@ export function LibraryAlbumPage() {
                   )}
                 </span>
                 <span className="min-w-0">
-                  <span className={clsx('block truncate text-[13px] font-medium', current && 'text-accent')}>{track.title}</span>
-                  {track.artist !== album.artist && <span className="block truncate text-[12.5px] text-muted">{track.artist}</span>}
+                  <span className={clsx('block truncate text-13 font-medium', current && 'text-accent')}>{track.title}</span>
+                  {track.artist !== album.artist && <span className="block truncate text-12.5 text-muted">{track.artist}</span>}
                 </span>
-                <span className="hidden font-mono text-[11px] text-subtle sm:block">{trackQuality(track)}</span>
-                <span className="text-[12.5px] text-subtle tabular">{duration(track.duration)}</span>
+                <span className="hidden font-mono text-11 text-subtle sm:block">{trackQuality(track)}</span>
+                <span className="text-12.5 text-subtle tabular">{duration(track.duration)}</span>
                 <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100">
                   <Menu
                     label={`More actions for ${track.title}`}

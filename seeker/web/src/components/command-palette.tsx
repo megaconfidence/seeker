@@ -129,7 +129,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onKeyDown}
             placeholder="Artist - album or song, or jump to a page"
-            className="h-13 flex-1 bg-transparent text-[15px] placeholder:text-subtle focus:outline-none"
+            className="h-13 flex-1 bg-transparent text-15 placeholder:text-subtle focus:outline-none"
             spellCheck={false}
             autoComplete="off"
             role="combobox"
@@ -157,7 +157,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 onClose()
               }}
               className={clsx(
-                'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px]',
+                'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-13',
                 index === selected ? 'bg-hover text-fg' : 'text-muted',
               )}
             >
@@ -166,12 +166,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             </button>
           ))}
           {query.length > 1 && !preview.isFetching && candidates.length === 0 && (
-            <p className="px-3 py-6 text-center text-[13px] text-muted">
+            <p className="px-3 py-6 text-center text-13 text-muted">
               Nothing in the catalog. Press Enter to search, or try the Soulseek file search.
             </p>
           )}
         </div>
-        <div className="flex items-center gap-4 border-t border-line px-4 py-2 text-[11.5px] text-subtle">
+        <div className="flex items-center gap-4 border-t border-line px-4 py-2 text-11.5 text-subtle">
           <span>↵ {candidates.length ? 'Download' : 'Open'}</span>
           {candidates.length > 0 && <span>⌘↵ Open page</span>}
           <span>↑↓ Move</span>

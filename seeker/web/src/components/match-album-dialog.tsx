@@ -42,8 +42,8 @@ function Row({
     <div className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-hover">
       <Cover src={coverAt(cover, 250)} className="size-12" rounded="sm" />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium">{title}</div>
-        <div className="truncate text-[12.5px] text-muted">{meta}</div>
+        <div className="truncate text-13 font-medium">{title}</div>
+        <div className="truncate text-12.5 text-muted">{meta}</div>
         {badge && <div className="mt-1">{badge}</div>}
       </div>
       <Button size="sm" loading={pending} disabled={disabled} onClick={onChoose}>
@@ -138,7 +138,7 @@ export function MatchAlbumDialog({
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder={initialQuery ? `Search the catalog, e.g. ${initialQuery}` : 'Search the catalog for the right album'}
-          className="h-9 w-full rounded-md border border-line-strong bg-raised pr-3 pl-8 text-[13px] placeholder:text-subtle focus:border-fg/30 focus:outline-none"
+          className="h-9 w-full rounded-md border border-line-strong bg-raised pr-3 pl-8 text-13 placeholder:text-subtle focus:border-fg/30 focus:outline-none"
           spellCheck={false}
           autoComplete="off"
         />
@@ -156,7 +156,7 @@ export function MatchAlbumDialog({
                 </div>
               </div>
             ))}
-          {search.data && albums.length === 0 && <p className="px-2 py-6 text-center text-[13px] text-muted">No albums found for “{query}”.</p>}
+          {search.data && albums.length === 0 && <p className="px-2 py-6 text-center text-13 text-muted">No albums found for “{query}”.</p>}
           {albums.map((album) => (
             <Row
               key={album.id}
@@ -172,7 +172,7 @@ export function MatchAlbumDialog({
         </div>
       ) : (
         <div className="flex flex-col">
-          <div className="px-2 pb-1 text-[12px] font-medium text-muted">Suggested from the files’ tags</div>
+          <div className="px-2 pb-1 text-12 font-medium text-muted">Suggested from the files’ tags</div>
           {candidates.isPending && (
             <>
               {Array.from({ length: 3 }, (_, index) => (
@@ -184,12 +184,12 @@ export function MatchAlbumDialog({
                   </div>
                 </div>
               ))}
-              <p className="px-2 pt-1 text-[12px] text-subtle">Comparing the files with catalog albums…</p>
+              <p className="px-2 pt-1 text-12 text-subtle">Comparing the files with catalog albums…</p>
             </>
           )}
-          {candidates.isError && <p className="px-2 py-4 text-[13px] text-bad">{(candidates.error as Error).message}</p>}
+          {candidates.isError && <p className="px-2 py-4 text-13 text-bad">{(candidates.error as Error).message}</p>}
           {candidates.data?.length === 0 && (
-            <p className="px-2 py-6 text-center text-[13px] text-muted">No likely albums. Search the catalog above.</p>
+            <p className="px-2 py-6 text-center text-13 text-muted">No likely albums. Search the catalog above.</p>
           )}
           {candidates.data?.map((candidate) => {
             const key = `${candidate.source}:${candidate.mbid ?? candidate.id}`

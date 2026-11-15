@@ -42,12 +42,12 @@ function fileState(file: JobFile): { text: string; tone: string } {
 function FileRow({ file, title }: { file: JobFile; title: string }) {
   const state = fileState(file)
   return (
-    <div className="grid grid-cols-[1fr_auto] gap-x-3 border-b border-line py-1.5 text-[12.5px] last:border-0">
+    <div className="grid grid-cols-[1fr_auto] gap-x-3 border-b border-line py-1.5 text-12.5 last:border-0">
       <div className="min-w-0">
         <div className={clsx('truncate', (file.state === 'failed' || file.state === 'cancelled') && 'text-muted line-through decoration-subtle/60')}>
           {title}
         </div>
-        <div className="truncate text-[11.5px] text-subtle" title={file.filename}>
+        <div className="truncate text-11.5 text-subtle" title={file.filename}>
           {file.username === 'local' ? 'Your file' : file.username} · {bytes(file.size)}
         </div>
       </div>
@@ -67,7 +67,7 @@ function JobDetailPanel({ job }: { job: Job }) {
   })
   if (detail.isPending) {
     return (
-      <div className="flex items-center gap-2 border-t border-line px-4 py-4 text-[12.5px] text-muted">
+      <div className="flex items-center gap-2 border-t border-line px-4 py-4 text-12.5 text-muted">
         <Spinner className="size-3.5" /> Loading…
       </div>
     )
@@ -84,9 +84,9 @@ function JobDetailPanel({ job }: { job: Job }) {
   return (
     <div className="grid animate-content-in gap-6 border-t border-line bg-panel/40 px-4 py-4 lg:grid-cols-[3fr_2fr]">
       <div className="min-w-0">
-        <div className="mb-2 text-[12px] font-medium text-muted">Files</div>
+        <div className="mb-2 text-12 font-medium text-muted">Files</div>
         {files.length === 0 ? (
-          <p className="text-[12.5px] text-subtle">No files yet.</p>
+          <p className="text-12.5 text-subtle">No files yet.</p>
         ) : (
           <div className="flex flex-col">
             {current.map((file) => (
@@ -96,7 +96,7 @@ function JobDetailPanel({ job }: { job: Job }) {
               <button
                 type="button"
                 onClick={() => setShowDropped((value) => !value)}
-                className="mt-2 self-start text-[12px] text-muted hover:text-fg"
+                className="mt-2 self-start text-12 text-muted hover:text-fg"
               >
                 {showDropped ? 'Hide' : 'Show'} {dropped.length} dropped {dropped.length === 1 ? 'source' : 'sources'}
               </button>
@@ -112,8 +112,8 @@ function JobDetailPanel({ job }: { job: Job }) {
         )}
       </div>
       <div className="min-w-0">
-        <div className="mb-2 text-[12px] font-medium text-muted">Activity</div>
-        <ol className="scrollbar-thin max-h-72 overflow-y-auto font-mono text-[11.5px] leading-relaxed">
+        <div className="mb-2 text-12 font-medium text-muted">Activity</div>
+        <ol className="scrollbar-thin max-h-72 overflow-y-auto font-mono text-11.5 leading-relaxed">
           {[...log].reverse().map((entry, index) => (
             <li key={index} className="flex gap-2">
               <span className="shrink-0 text-subtle tabular">{new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
@@ -151,18 +151,21 @@ export function JobRow({ job, defaultOpen = false }: { job: Job; defaultOpen?: b
         )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-[13.5px] font-medium">{job.title}</span>
+            <span className="truncate text-13.5 font-medium max-sm:line-clamp-2 max-sm:whitespace-normal">{job.title}</span>
             <Badge>{KIND[job.kind]}</Badge>
             {job.origin === 'watchlist' && <Badge tone="accent">New release</Badge>}
           </div>
-          <div className="truncate text-[12.5px] text-muted">
+          <div className="truncate text-12.5 text-muted">
             {job.artist}
             {job.kind === 'track' && job.album ? ` · ${job.album}` : ''}
           </div>
-          <div className="mt-1.5 flex items-center gap-2 text-[12.5px]">
+          <div className="mt-1.5 flex items-center gap-2 text-12.5">
             <StatusIcon status={job.status} className="size-3.5" />
-            <span className={clsx('min-w-0 truncate', job.status === 'failed' ? 'text-bad' : 'text-fg/90')}>{statusLabel(job)}</span>
-            <span className="ml-auto hidden shrink-0 text-[12px] text-muted tabular sm:inline">{progressLine(job)}</span>
+            {/* Two lines on a phone: the queue position or the reason comes last. */}
+            <span className={clsx('min-w-0 truncate max-sm:line-clamp-2 max-sm:whitespace-normal', job.status === 'failed' ? 'text-bad' : 'text-fg/90')}>
+              {statusLabel(job)}
+            </span>
+            <span className="ml-auto hidden shrink-0 text-12 text-muted tabular sm:inline">{progressLine(job)}</span>
           </div>
           {active && <Progress value={jobPercent(job)} className="mt-2" tone="accent" />}
         </div>
@@ -260,7 +263,7 @@ export function DownloadsPage() {
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder="Filter downloads"
-            className="h-8.5 w-full rounded-md border border-line-strong bg-raised pr-3 pl-8 text-[13px] placeholder:text-subtle focus:border-fg/30 focus:outline-none"
+            className="h-8.5 w-full rounded-md border border-line-strong bg-raised pr-3 pl-8 text-13 placeholder:text-subtle focus:border-fg/30 focus:outline-none"
           />
         </div>
       )}
@@ -269,7 +272,7 @@ export function DownloadsPage() {
           Search for an album or song and press Download. Progress shows up here.
         </Empty>
       )}
-      {all.length > 0 && list.length === 0 && <p className="text-[13px] text-muted">No downloads match “{filter}”.</p>}
+      {all.length > 0 && list.length === 0 && <p className="text-13 text-muted">No downloads match “{filter}”.</p>}
       {active.length > 0 && (
         <Section className="animate-content-in" title="In progress" count={active.length}>
           <div className="flex flex-col gap-2">
@@ -295,7 +298,7 @@ export function DownloadsPage() {
               <JobRow key={job.id} job={job} defaultOpen={focus === job.id} />
             ))}
           </div>
-          <p className="mt-3 text-[12px] text-subtle">Finished downloads stay here for two weeks. Last updated {relativeTime(finished[0]?.updatedAt)}.</p>
+          <p className="mt-3 text-12 text-subtle">Finished downloads stay here for two weeks. Last updated {relativeTime(finished[0]?.updatedAt)}.</p>
         </Section>
       )}
     </div>

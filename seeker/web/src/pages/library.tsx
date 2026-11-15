@@ -42,10 +42,10 @@ function AlbumTile({ album }: { album: LibraryAlbum }) {
           <Play className="ml-0.5 size-4" fill="currentColor" />
         </button>
       </div>
-      <div className="mt-2 truncate text-[13px] font-medium" title={album.title}>
+      <div className="mt-2 truncate text-13 font-medium" title={album.title}>
         {album.title}
       </div>
-      <div className="truncate text-[12.5px] text-muted">
+      <div className="truncate text-12.5 text-muted">
         {album.artist}
         {album.year ? ` · ${album.year}` : ''}
       </div>
@@ -160,7 +160,7 @@ export function LibraryPage() {
       {problem && (
         <div className="mb-6 flex flex-col gap-3 rounded-lg border border-line bg-panel px-4 py-3 sm:flex-row sm:items-center">
           <TriangleAlert className="size-4 shrink-0 text-warn" />
-          <p className="min-w-0 flex-1 text-[13px] text-muted">{problem.message}</p>
+          <p className="min-w-0 flex-1 text-13 text-muted">{problem.message}</p>
           {problem.canForce && (
             <Button size="sm" variant="secondary" disabled={scanning} onClick={() => void removeMissing(problem.missing)}>
               Remove missing tracks
@@ -186,7 +186,7 @@ export function LibraryPage() {
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             placeholder={tab === 'albums' ? 'Filter albums' : 'Filter artists'}
-            className="h-8.5 w-full rounded-md border border-line-strong bg-raised pr-3 pl-8 text-[13px] placeholder:text-subtle focus:border-fg/30 focus:outline-none"
+            className="h-8.5 w-full rounded-md border border-line-strong bg-raised pr-3 pl-8 text-13 placeholder:text-subtle focus:border-fg/30 focus:outline-none"
           />
         </div>
         {tab === 'albums' && (
@@ -255,8 +255,8 @@ export function LibraryPage() {
             >
               <Cover src={item.coverAlbumId ? coverUrl(item.coverAlbumId) : null} rounded="full" kind="artist" className="size-11" />
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-medium">{item.name}</div>
-                <div className="text-[12px] text-muted">
+                <div className="truncate text-13 font-medium">{item.name}</div>
+                <div className="text-12 text-muted">
                   {plural(item.albums, 'album')} · {plural(item.tracks, 'track')}
                 </div>
               </div>

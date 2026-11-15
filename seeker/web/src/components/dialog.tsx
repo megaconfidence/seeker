@@ -85,8 +85,8 @@ export function Dialog({
       >
         <div className="flex items-start gap-4 px-5 pt-5 pb-3">
           <div className="min-w-0 flex-1">
-            <h2 className="text-[15px] font-semibold tracking-tight">{shown.title}</h2>
-            {shown.description && <div className="mt-1 text-[13px] text-muted">{shown.description}</div>}
+            <h2 className="text-15 font-semibold tracking-tight">{shown.title}</h2>
+            {shown.description && <div className="mt-1 text-13 text-muted">{shown.description}</div>}
           </div>
           <button
             type="button"

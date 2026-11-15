@@ -59,7 +59,7 @@ export function WishlistPage() {
               <div key={job.id} className="flex items-center gap-3 px-3 py-3">
                 <Cover src={coverAt(job.coverUrl, 250)} className="size-11" rounded="sm" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13.5px] font-medium">
+                  <div className="truncate text-13.5 font-medium">
                     {link ? (
                       <Link to={link} className="hover:underline">
                         {job.title}
@@ -68,10 +68,10 @@ export function WishlistPage() {
                       job.title
                     )}
                   </div>
-                  <div className="truncate text-[12.5px] text-muted">
+                  <div className="truncate text-12.5 text-muted">
                     {job.artist} · {KIND[job.kind]}
                   </div>
-                  <div className="mt-1 truncate text-[12.5px] text-muted">
+                  <div className="mt-1 truncate text-12.5 text-muted max-sm:line-clamp-3 max-sm:whitespace-normal">
                     <span className="text-fg/80">{job.error ?? 'Not found yet'}</span>
                     {job.nextRetryAt && <span> · next try {relativeTime(job.nextRetryAt)}</span>}
                     <span> · {plural(job.attempts, 'attempt')}</span>

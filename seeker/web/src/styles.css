@@ -19,6 +19,27 @@
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
+/* Text sizes, named after their size in px at a 16px root. Like Tailwind's spacing they're in rem, so
+   they grow with everything else (the html font size, below). */
+@theme {
+  --text-9\.5: 0.59375rem;
+  --text-10\.5: 0.65625rem;
+  --text-11: 0.6875rem;
+  --text-11\.5: 0.71875rem;
+  --text-12: 0.75rem;
+  --text-12\.5: 0.78125rem;
+  --text-13: 0.8125rem;
+  --text-13\.5: 0.84375rem;
+  --text-14: 0.875rem;
+  --text-15: 0.9375rem;
+  --text-20: 1.25rem;
+  --text-22: 1.375rem;
+  --text-28: 1.75rem;
+  --text-30: 1.875rem;
+  --text-34: 2.125rem;
+  --text-38: 2.375rem;
+}
+
 /* Motion: short and soft. Everything is switched off for people who prefer reduced motion (below). */
 @theme {
   --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -155,11 +176,24 @@
     height: 100%;
   }
 
+  /* The interface is drawn a little bigger than its design: 110% on a desktop, and a step more on
+     touch screens, where sizes made for a mouse are small. Everything is sized in rem for this; px is
+     only for hairlines, outlines and blurs. */
+  html {
+    font-size: 110%;
+  }
+
+  @media (pointer: coarse) {
+    html {
+      font-size: 115%;
+    }
+  }
+
   body {
     background: var(--bg);
     color: var(--fg);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 0.875rem;
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

@@ -33,13 +33,13 @@ function RecentlyAdded() {
   })
   if (!data?.length) return null
   return (
-    <Section title="Recently added" actions={<Link to="/library" className="text-[12.5px] text-muted hover:text-fg">Library</Link>}>
+    <Section title="Recently added" actions={<Link to="/library" className="text-12.5 text-muted hover:text-fg">Library</Link>}>
       <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
         {data.slice(0, 6).map((album) => (
           <Link key={album.id} to={`/library/album/${album.id}`} className="group min-w-0">
             <Cover src={album.hasCover ? coverUrl(album.id) : null} className="w-full transition group-hover:brightness-[0.85]" />
-            <div className="mt-2 truncate text-[13px] font-medium">{album.title}</div>
-            <div className="truncate text-[12.5px] text-muted">{album.artist}</div>
+            <div className="mt-2 truncate text-13 font-medium">{album.title}</div>
+            <div className="truncate text-12.5 text-muted">{album.artist}</div>
           </Link>
         ))}
       </div>
@@ -64,7 +64,7 @@ function Preview({
   return (
     <div className="mb-8 animate-pop-in overflow-hidden rounded-xl border border-line-strong bg-raised shadow-lg shadow-black/5">
       <div className="flex items-center justify-between px-4 pt-3 pb-1">
-        <span className="text-[12px] font-medium text-muted">{preview.best ? 'Best match' : 'No confident match. Did you mean one of these?'}</span>
+        <span className="text-12 font-medium text-muted">{preview.best ? 'Best match' : 'No confident match. Did you mean one of these?'}</span>
         <button type="button" onClick={onClose} className="rounded-md p-1 text-subtle hover:bg-hover hover:text-fg" aria-label="Close preview">
           <X className="size-4" />
         </button>
@@ -72,7 +72,7 @@ function Preview({
       <div role="listbox" className="p-1.5">
         {list.map((candidate, index) => (
           <div key={`${candidate.kind}-${candidate.mbid ?? candidate.id}`}>
-            {index === 1 && preview.best && <div className="px-2.5 pt-3 pb-1 text-[12px] font-medium text-muted">Other matches</div>}
+            {index === 1 && preview.best && <div className="px-2.5 pt-3 pb-1 text-12 font-medium text-muted">Other matches</div>}
             <MatchRow
               candidate={candidate}
               selected={index === selected}
@@ -82,7 +82,7 @@ function Preview({
             />
           </div>
         ))}
-        {list.length === 0 && <p className="px-3 py-4 text-[13px] text-muted">Nothing in the catalog matches. Try the Soulseek file search.</p>}
+        {list.length === 0 && <p className="px-3 py-4 text-13 text-muted">Nothing in the catalog matches. Try the Soulseek file search.</p>}
       </div>
     </div>
   )
@@ -184,7 +184,7 @@ export function SearchPage() {
         className="mb-6"
       >
         <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-subtle" />
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-subtle" />
           <input
             ref={input}
             autoFocus
@@ -195,7 +195,7 @@ export function SearchPage() {
             }}
             onKeyDown={onKeyDown}
             placeholder="Search for an artist, album or song"
-            className="h-12 w-full rounded-lg border border-line-strong bg-raised pr-12 pl-11 text-[15px] placeholder:text-subtle focus:border-fg/30 focus:outline-none"
+            className="h-12 w-full rounded-lg border border-line-strong bg-raised pr-12 pl-11 text-15 placeholder:text-subtle focus:border-fg/30 focus:outline-none"
             spellCheck={false}
             autoComplete="off"
             aria-label="Search"
@@ -227,12 +227,12 @@ export function SearchPage() {
           <button
             type="submit"
             disabled={!text.trim() || preview.isPending}
-            className="inline-flex items-center gap-2 text-[12.5px] text-muted transition hover:text-fg disabled:opacity-40"
+            className="inline-flex items-center gap-2 text-12.5 text-muted transition hover:text-fg disabled:opacity-40"
           >
             {preview.isPending ? (
               <Spinner className="size-3.5" />
             ) : (
-              <kbd className="inline-flex h-5 items-center rounded border border-line-strong px-1.5 font-sans text-[11px]">
+              <kbd className="inline-flex h-5 items-center rounded border border-line-strong px-1.5 font-sans text-11">
                 <CornerDownLeft className="size-3" />
               </kbd>
             )}
@@ -241,7 +241,7 @@ export function SearchPage() {
         </div>
       </form>
 
-      {preview.isError && <p className="mb-6 text-[13px] text-bad">{(preview.error as Error).message}</p>}
+      {preview.isError && <p className="mb-6 text-13 text-bad">{(preview.error as Error).message}</p>}
       {preview.data && (
         <Preview preview={preview.data} onClose={() => preview.reset()} onDownload={download} selected={selected} setSelected={setSelected} />
       )}
@@ -250,11 +250,11 @@ export function SearchPage() {
         <>
           <RecentlyAdded />
           <div className="rounded-xl border border-line px-6 py-8">
-            <p className="text-[15px] font-medium">Type what you want to hear.</p>
-            <p className="mt-1 max-w-lg text-[13px] text-muted">
+            <p className="text-15 font-medium">Type what you want to hear.</p>
+            <p className="mt-1 max-w-lg text-13 text-muted">
               Search the catalog and download albums or songs from Soulseek. Seeker picks the best copy it can find, checks it, tags it and
               files it in your library. Press Enter to see the best match, and Enter again to get it. Press{' '}
-              <kbd className="rounded border border-line-strong px-1 font-sans text-[11px]">{shortcutLabel}</kbd> anywhere for the quick bar.
+              <kbd className="rounded border border-line-strong px-1 font-sans text-11">{shortcutLabel}</kbd> anywhere for the quick bar.
             </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {EXAMPLES.map((example) => (
@@ -265,7 +265,7 @@ export function SearchPage() {
                     setText(example)
                     input.current?.focus()
                   }}
-                  className="h-7 rounded-full border border-line-strong px-3 text-[12.5px] text-muted hover:bg-hover hover:text-fg"
+                  className="h-7 rounded-full border border-line-strong px-3 text-12.5 text-muted hover:bg-hover hover:text-fg"
                 >
                   {example}
                 </button>
@@ -285,11 +285,11 @@ export function SearchPage() {
           </Section>
         </>
       )}
-      {results.isError && query.length > 1 && <p className="text-[13px] text-bad">{(results.error as Error).message}</p>}
+      {results.isError && query.length > 1 && <p className="text-13 text-bad">{(results.error as Error).message}</p>}
       {empty && (
         <div className="rounded-xl border border-dashed border-line-strong px-6 py-10 text-center">
           <p className="font-medium">No results for “{query}”</p>
-          <p className="mt-1 text-[13px] text-muted">Check the spelling, or look further afield.</p>
+          <p className="mt-1 text-13 text-muted">Check the spelling, or look further afield.</p>
           <div className="mt-4 flex justify-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => setShowMb(true)}>
               Search MusicBrainz
@@ -311,8 +311,8 @@ export function SearchPage() {
                 {data.artists.map((artist) => (
                   <Link key={artist.id} to={`/artist/${artist.id}`} className="group w-28 shrink-0 rounded-lg p-2 text-center hover:bg-hover">
                     <Cover src={artist.picture} rounded="full" kind="artist" className="mx-auto w-24" />
-                    <div className="mt-2 truncate text-[13px] font-medium">{artist.name}</div>
-                    {artist.watched && <div className="text-[11.5px] text-muted">Following</div>}
+                    <div className="mt-2 truncate text-13 font-medium">{artist.name}</div>
+                    {artist.watched && <div className="text-11.5 text-muted">Following</div>}
                   </Link>
                 ))}
               </div>
@@ -338,7 +338,7 @@ export function SearchPage() {
       {(data || empty) && query.length > 1 && (
         <Section
           title="MusicBrainz"
-          actions={!showMb && <span className="text-[12.5px] text-muted">For albums the catalog doesn’t have</span>}
+          actions={!showMb && <span className="text-12.5 text-muted">For albums the catalog doesn’t have</span>}
         >
           {!showMb ? (
             <Button size="sm" variant="secondary" onClick={() => setShowMb(true)}>
@@ -353,7 +353,7 @@ export function SearchPage() {
               ))}
             </AlbumGrid>
           ) : (
-            <p className="text-[13px] text-muted">MusicBrainz has nothing for “{query}” either.</p>
+            <p className="text-13 text-muted">MusicBrainz has nothing for “{query}” either.</p>
           )}
         </Section>
       )}

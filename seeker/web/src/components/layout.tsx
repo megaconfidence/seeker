@@ -25,14 +25,14 @@ function NavItem({ to, icon, label, count }: { to: string; icon: ReactNode; labe
       end={to === '/'}
       className={({ isActive }) =>
         clsx(
-          'group flex h-8 items-center gap-2.5 rounded-md px-2.5 text-[13px] font-medium transition-colors',
+          'group flex h-8 items-center gap-2.5 rounded-md px-2.5 text-13 font-medium transition-colors',
           isActive ? 'bg-hover text-fg' : 'text-muted hover:bg-hover hover:text-fg',
         )
       }
     >
       <span className="[&>svg]:size-4">{icon}</span>
       <span className="flex-1">{label}</span>
-      {!!count && <span className="text-[11.5px] text-subtle tabular">{count}</span>}
+      {!!count && <span className="text-11.5 text-subtle tabular">{count}</span>}
     </NavLink>
   )
 }
@@ -49,7 +49,7 @@ function ConnectionStatus() {
         ? 'Not logged in to Soulseek'
         : 'slskd unreachable'
   return (
-    <div className="flex items-center gap-2 px-2.5 text-[12px] text-muted" title={slskd?.error ?? slskd?.state ?? ''}>
+    <div className="flex items-center gap-2 px-2.5 text-12 text-muted" title={slskd?.error ?? slskd?.state ?? ''}>
       <span
         className={clsx(
           'size-1.5 shrink-0 rounded-full',
@@ -80,16 +80,16 @@ function Sidebar({ onNavigate, onQuickSearch }: { onNavigate?: () => void; onQui
     <nav className="flex h-full flex-col gap-5 px-3 py-4" onClick={onNavigate}>
       <div className="flex items-center gap-2 px-2.5 pt-1">
         <Logo />
-        <span className="text-[15px] font-semibold tracking-tight">Seeker</span>
+        <span className="text-15 font-semibold tracking-tight">Seeker</span>
       </div>
       <button
         type="button"
         onClick={onQuickSearch}
-        className="flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2.5 text-left text-[12.5px] text-subtle transition-colors hover:border-fg/20 hover:text-muted"
+        className="flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2.5 text-left text-12.5 text-subtle transition-colors hover:border-fg/20 hover:text-muted"
       >
         <Search className="size-3.5" />
         <span className="flex-1">Quick get</span>
-        <kbd className="font-sans text-[11px] text-subtle">{shortcutLabel}</kbd>
+        <kbd className="font-sans text-11 text-subtle">{shortcutLabel}</kbd>
       </button>
       <div className="flex flex-col gap-0.5">
         <NavItem to="/" icon={<Search />} label="Search" />
@@ -192,7 +192,7 @@ export function Layout({ children }: { children: ReactNode }) {
           >
             <Menu className="size-5" />
           </button>
-          <span className="flex flex-1 items-center gap-2 text-[15px] font-semibold tracking-tight">
+          <span className="flex flex-1 items-center gap-2 text-15 font-semibold tracking-tight">
             <Logo />
             Seeker
           </span>
@@ -207,7 +207,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </header>
         <main ref={main} className={clsx('scrollbar-thin min-h-0 flex-1 overflow-y-auto', current && 'pb-20')}>
           {/* Keyed by page, so every navigation eases the new page in. */}
-          <div key={location.pathname} className="mx-auto w-full max-w-[1180px] animate-page-in px-4 py-6 md:px-8 md:py-8">
+          <div key={location.pathname} className="mx-auto w-full max-w-295 animate-page-in px-4 py-6 md:px-8 md:py-8">
             {children}
           </div>
         </main>

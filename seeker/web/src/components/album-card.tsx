@@ -54,10 +54,10 @@ export function AlbumCard({ album, showArtist = true }: { album: CatalogAlbum; s
         </div>
       </Link>
       <div className="mt-2 min-w-0">
-        <Link to={href} className="block truncate text-[13px] font-medium hover:underline" title={album.title}>
+        <Link to={href} className="block truncate text-13 font-medium hover:underline" title={album.title}>
           {album.title}
         </Link>
-        <div className="truncate text-[12.5px] text-muted">
+        <div className="truncate text-12.5 text-muted">
           {showArtist &&
             (album.artistId ? (
               <Link to={`/artist/${album.artistId}`} className="hover:text-fg hover:underline">

@@ -93,16 +93,16 @@ function QueueList({ onPick }: { onPick?: () => void }) {
             onPick?.()
           }}
           className={clsx(
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] hover:bg-hover',
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-13 hover:bg-hover',
             position === index && 'bg-hover',
           )}
         >
-          <span className={clsx('w-5 text-right text-[11px] tabular', position === index ? 'text-fg' : 'text-subtle')}>{position + 1}</span>
+          <span className={clsx('w-5 text-right text-11 tabular', position === index ? 'text-fg' : 'text-subtle')}>{position + 1}</span>
           <span className="min-w-0 flex-1">
             <span className={clsx('block truncate', position === index && 'font-medium')}>{track.title}</span>
-            <span className="block truncate text-[12px] text-muted">{track.artist}</span>
+            <span className="block truncate text-12 text-muted">{track.artist}</span>
           </span>
-          <span className="text-[11px] text-subtle tabular">{duration(track.duration)}</span>
+          <span className="text-11 text-subtle tabular">{duration(track.duration)}</span>
         </button>
       ))}
     </>
@@ -123,14 +123,14 @@ function QueuePopover({ onClose }: { onClose: () => void }) {
       ref={ref}
       className="scrollbar-thin absolute right-0 bottom-12 max-h-96 w-80 origin-bottom-right animate-pop-in overflow-y-auto rounded-lg border border-line-strong bg-raised p-1.5 shadow-xl shadow-black/30"
     >
-      <div className="px-2 py-1.5 text-[12px] font-medium text-muted">Queue</div>
+      <div className="px-2 py-1.5 text-12 font-medium text-muted">Queue</div>
       <QueueList />
     </div>
   )
 }
 
 function PreviewBadge() {
-  return <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10.5px] font-semibold tracking-wide text-accent uppercase">Preview</span>
+  return <span className="rounded bg-accent/15 px-1.5 py-0.5 text-10.5 font-semibold tracking-wide text-accent uppercase">Preview</span>
 }
 
 function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -159,7 +159,7 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         <button type="button" onClick={onClose} className="-ml-2 rounded-md p-2 text-muted hover:text-fg" aria-label="Close player">
           <ChevronDown className="size-6" />
         </button>
-        <span className="text-[12px] font-medium text-muted">{showQueue ? 'Queue' : current.preview ? 'Preview' : 'Now playing'}</span>
+        <span className="text-12 font-medium text-muted">{showQueue ? 'Queue' : current.preview ? 'Preview' : 'Now playing'}</span>
         <button
           type="button"
           onClick={() => setShowQueue((value) => !value)}
@@ -175,16 +175,16 @@ function MobileSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col justify-center gap-8">
-          <Cover src={largeCover(current.cover)} className="mx-auto w-full max-w-[340px] shadow-2xl shadow-black/30" />
+          <Cover src={largeCover(current.cover)} className="mx-auto w-full max-w-85 shadow-2xl shadow-black/30" />
           <div>
-            <div className="truncate text-[20px] font-semibold tracking-tight">{current.title}</div>
-            <div className="truncate text-[15px] text-muted">{current.artist}</div>
+            <div className="truncate text-20 font-semibold tracking-tight">{current.title}</div>
+            <div className="truncate text-15 text-muted">{current.artist}</div>
           </div>
           <Scrubber large />
           <div className="flex items-center justify-between">
             <ModeButtons />
             <Transport size="lg" />
-            <span className="w-[72px]" />
+            <span className="w-18" />
           </div>
         </div>
       )}
@@ -207,10 +207,10 @@ export function PlayerBar() {
       <Cover src={current.cover} className="size-11" rounded="sm" />
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[13px] font-medium">{current.title}</span>
+          <span className="truncate text-13 font-medium">{current.title}</span>
           {current.preview && <PreviewBadge />}
         </div>
-        <div className="truncate text-[12px] text-muted">{current.artist}</div>
+        <div className="truncate text-12 text-muted">{current.artist}</div>
       </div>
     </>
   )
@@ -218,7 +218,7 @@ export function PlayerBar() {
   return (
     <div className="fixed inset-x-0 bottom-0 z-30 animate-bar-in border-t border-line bg-panel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:left-56">
       <MiniProgress />
-      <div className="mx-auto flex h-[72px] max-w-[1400px] items-center gap-4 px-3 md:px-6">
+      <div className="mx-auto flex h-18 max-w-350 items-center gap-4 px-3 md:px-6">
         <button type="button" onClick={() => setSheet(true)} className="flex min-w-0 flex-1 items-center gap-3 text-left md:hidden">
           {info}
         </button>
@@ -234,7 +234,7 @@ export function PlayerBar() {
           <div className="flex items-center gap-2">
             <ModeButtons />
             <Transport />
-            <span className="w-[72px]" />
+            <span className="w-18" />
           </div>
           <div className="w-full max-w-xl">
             <Scrubber />

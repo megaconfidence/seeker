@@ -66,9 +66,9 @@ export function ArtistPage() {
       <div className="mb-10 flex flex-col gap-6 sm:flex-row sm:items-end">
         <Cover src={artist.picture} rounded="full" kind="artist" className="w-36 sm:w-44" />
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] font-medium text-muted">Artist</div>
-          <h1 className="mt-1 text-[30px] leading-tight font-semibold tracking-tight sm:text-[38px]">{artist.name}</h1>
-          <div className="mt-2 text-[13px] text-muted">
+          <div className="text-12 font-medium text-muted">Artist</div>
+          <h1 className="mt-1 text-30 leading-tight font-semibold tracking-tight sm:text-38">{artist.name}</h1>
+          <div className="mt-2 text-13 text-muted">
             {[formatFans(artist.fans), `${albums.length} releases`, owned ? `${owned} in your library` : null].filter(Boolean).join(' · ')}
           </div>
           <div className="mt-5">

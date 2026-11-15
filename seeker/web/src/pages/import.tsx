@@ -41,7 +41,7 @@ export function ImportPage() {
         subtitle={
           list.data ? (
             <>
-              Albums in <span className="font-mono text-[12px]">{list.data.dir}</span>. Seeker matches each folder to an album, tags the files and
+              Albums in <span className="font-mono text-12">{list.data.dir}</span>. Seeker matches each folder to an album, tags the files and
               files them in your library.
             </>
           ) : (
@@ -69,7 +69,7 @@ export function ImportPage() {
             { value: 'move', label: 'Move files' },
           ]}
         />
-        <span className="text-[12.5px] text-muted">
+        <span className="text-12.5 text-muted">
           {mode === 'copy' ? 'The originals stay where they are.' : 'Files are moved out of the import folder.'}
         </span>
       </div>
@@ -87,15 +87,15 @@ export function ImportPage() {
           ))}
         </div>
       ) : list.isError ? (
-        <p className="text-[13px] text-bad">{(list.error as Error).message}</p>
+        <p className="text-13 text-bad">{(list.error as Error).message}</p>
       ) : !list.data.exists ? (
         <Empty icon={<FolderInput className="size-6" />} title="No import folder">
-          Seeker looks for music to import in <span className="font-mono text-[12px]">{list.data.dir}</span>. Mount a folder there and
+          Seeker looks for music to import in <span className="font-mono text-12">{list.data.dir}</span>. Mount a folder there and
           restart Seeker.
         </Empty>
       ) : list.data.folders.length === 0 ? (
         <Empty icon={<FolderInput className="size-6" />} title="Nothing to import">
-          Put album folders in <span className="font-mono text-[12px]">{list.data.dir}</span>, then refresh.
+          Put album folders in <span className="font-mono text-12">{list.data.dir}</span>, then refresh.
         </Empty>
       ) : (
         <div className="flex animate-content-in flex-col gap-2">
@@ -110,12 +110,12 @@ export function ImportPage() {
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[13.5px] font-medium">{name}</span>
+                      <span className="truncate text-13.5 font-medium">{name}</span>
                       {started.has(folder.id) && <Badge tone="ok">Import started</Badge>}
                     </div>
-                    <div className="truncate text-[12.5px] text-muted">{meta.join(' · ')}</div>
+                    <div className="truncate text-12.5 text-muted">{meta.join(' · ')}</div>
                     {folder.album && folder.name !== folder.album && (
-                      <div className="truncate font-mono text-[11.5px] text-subtle">{folder.path}</div>
+                      <div className="truncate font-mono text-11.5 text-subtle">{folder.path}</div>
                     )}
                   </div>
                 </div>

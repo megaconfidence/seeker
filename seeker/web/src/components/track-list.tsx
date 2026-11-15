@@ -9,7 +9,7 @@ import { TrackDownloadIcon } from './download-button.tsx'
 
 function Explicit() {
   return (
-    <span className="ml-1.5 inline-flex h-3.5 shrink-0 items-center rounded-[3px] bg-subtle/30 px-1 text-[9.5px] font-semibold text-muted" title="Explicit">
+    <span className="ml-1.5 inline-flex h-3.5 shrink-0 items-center rounded-[0.1875rem] bg-subtle/30 px-1 text-9.5 font-semibold text-muted" title="Explicit">
       E
     </span>
   )
@@ -63,17 +63,17 @@ export function TrackList({
         const title = item?.preview ? `Play a preview of ${track.title}` : `Play ${track.title}`
         return (
           <div key={`${track.id}-${index}`}>
-            {header && <div className="mt-4 mb-1 px-3 text-[12px] font-medium text-subtle first:mt-0">Disc {disc}</div>}
+            {header && <div className="mt-4 mb-1 px-3 text-12 font-medium text-subtle first:mt-0">Disc {disc}</div>}
             <div
               className={clsx(
                 'group grid h-12 items-center gap-3 rounded-md px-3 hover:bg-hover',
                 isCurrent && 'bg-hover',
-                variant === 'album' ? 'grid-cols-[28px_1fr_auto_28px]' : 'grid-cols-[40px_1fr_auto_28px] md:grid-cols-[40px_1fr_1fr_auto_28px]',
+                variant === 'album' ? 'grid-cols-[1.75rem_1fr_auto_1.75rem]' : 'grid-cols-[2.5rem_1fr_auto_1.75rem] md:grid-cols-[2.5rem_1fr_1fr_auto_1.75rem]',
               )}
               onDoubleClick={() => item && start(track)}
             >
               {variant === 'album' ? (
-                <div className="relative flex justify-center text-[12.5px] text-subtle tabular">
+                <div className="relative flex justify-center text-12.5 text-subtle tabular">
                   {isCurrent && player.playing ? (
                     <AudioLines className="size-4 text-accent" />
                   ) : (
@@ -101,7 +101,7 @@ export function TrackList({
                       type="button"
                       onClick={() => start(track)}
                       className={clsx(
-                        'absolute inset-0 flex items-center justify-center rounded-[4px] bg-black/45 text-white transition-opacity',
+                        'absolute inset-0 flex items-center justify-center rounded-sm bg-black/45 text-white transition-opacity',
                         isCurrent && player.playing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
                       )}
                       aria-label={title}
@@ -113,25 +113,25 @@ export function TrackList({
                 </div>
               )}
               <div className="min-w-0">
-                <div className={clsx('flex items-center truncate text-[13px] font-medium', isCurrent && 'text-accent')}>
+                <div className={clsx('flex items-center truncate text-13 font-medium', isCurrent && 'text-accent')}>
                   <span className="truncate">{track.title}</span>
                   {track.explicit && <Explicit />}
                 </div>
                 {(albumArtist ? track.artist !== albumArtist : variant === 'list') &&
                   (track.artistId ? (
-                    <Link to={`/artist/${track.artistId}`} className="block truncate text-[12.5px] text-muted hover:text-fg hover:underline">
+                    <Link to={`/artist/${track.artistId}`} className="block truncate text-12.5 text-muted hover:text-fg hover:underline">
                       {track.artist}
                     </Link>
                   ) : (
-                    <span className="block truncate text-[12.5px] text-muted">{track.artist}</span>
+                    <span className="block truncate text-12.5 text-muted">{track.artist}</span>
                   ))}
               </div>
               {variant === 'list' && (
-                <Link to={`/album/${track.albumId}`} className="hidden truncate text-[12.5px] text-muted hover:text-fg hover:underline md:block">
+                <Link to={`/album/${track.albumId}`} className="hidden truncate text-12.5 text-muted hover:text-fg hover:underline md:block">
                   {track.album}
                 </Link>
               )}
-              <span className="text-[12.5px] text-subtle tabular">{duration(track.duration)}</span>
+              <span className="text-12.5 text-subtle tabular">{duration(track.duration)}</span>
               {track.id ? (
                 <TrackDownloadIcon trackId={track.id} owned={track.owned} job={track.job} />
               ) : (

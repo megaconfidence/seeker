@@ -84,8 +84,8 @@ export function WatchlistPage() {
               <Link to={`/artist/${artist.id}`} className="flex min-w-0 flex-1 items-center gap-3">
                 <Cover src={artist.picture} rounded="full" kind="artist" className="size-11" />
                 <div className="min-w-0">
-                  <div className="truncate text-[13.5px] font-medium hover:underline">{artist.name}</div>
-                  <div className="text-[12px] text-muted">
+                  <div className="truncate text-13.5 font-medium hover:underline">{artist.name}</div>
+                  <div className="text-12 text-muted">
                     {artist.lastCheckedAt ? `Checked ${relativeTime(artist.lastCheckedAt)}` : 'Not checked yet'}
                     {artist.lastFound > 0 && ` · ${artist.lastFound} new release${artist.lastFound === 1 ? '' : 's'} found`}
                   </div>
@@ -103,7 +103,7 @@ export function WatchlistPage() {
                         if (next.length) update.mutate({ id: artist.id, types: next })
                       }}
                       className={clsx(
-                        'h-7 rounded-full border px-2.5 text-[12px] transition-colors',
+                        'h-7 rounded-full border px-2.5 text-12 transition-colors',
                         on ? 'border-fg/20 bg-hover text-fg' : 'border-line text-subtle hover:text-muted',
                       )}
                     >

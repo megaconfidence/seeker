@@ -22,7 +22,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return (
     <div className="flex min-h-full items-center justify-center px-6">
-      <form onSubmit={submit} className="w-full max-w-[320px]">
+      <form onSubmit={submit} className="w-full max-w-80">
         <div className="mb-8 flex flex-col items-center gap-3">
           <svg viewBox="0 0 64 64" className="size-10" aria-hidden>
             <rect width="64" height="64" rx="14" className="fill-fg" />
@@ -32,7 +32,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
           </svg>
           <h1 className="text-lg font-semibold tracking-tight">Sign in to Seeker</h1>
         </div>
-        <label className="mb-1.5 block text-[12.5px] font-medium text-muted" htmlFor="password">
+        <label className="mb-1.5 block text-12.5 font-medium text-muted" htmlFor="password">
           Password
         </label>
         <Input
@@ -43,7 +43,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
-        {error && <p className="mt-2 text-[12.5px] text-bad">{error}</p>}
+        {error && <p className="mt-2 text-12.5 text-bad">{error}</p>}
         <Button type="submit" variant="primary" className="mt-4 w-full" loading={busy} disabled={!password}>
           Sign in
         </Button>

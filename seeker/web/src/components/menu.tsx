@@ -69,7 +69,7 @@ export function Menu({ items, label = 'More actions', align = 'right' }: { items
                 item.onSelect()
               }}
               className={clsx(
-                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-hover disabled:opacity-40 disabled:hover:bg-transparent',
+                'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-13 transition-colors hover:bg-hover disabled:opacity-40 disabled:hover:bg-transparent',
                 item.tone === 'danger' ? 'text-bad' : 'text-fg',
               )}
             >

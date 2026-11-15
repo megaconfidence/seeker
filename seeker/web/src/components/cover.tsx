@@ -18,7 +18,7 @@ export function Cover({
   // Tracked per address, so a new cover fades in again and a broken one doesn't hide the next.
   const [loaded, setLoaded] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
-  const radius = rounded === 'full' ? 'rounded-full' : rounded === 'sm' ? 'rounded-[4px]' : 'rounded-md'
+  const radius = rounded === 'full' ? 'rounded-full' : rounded === 'sm' ? 'rounded-sm' : 'rounded-md'
   const showImage = !!src && failed !== src
   return (
     <div className={clsx('relative aspect-square shrink-0 overflow-hidden bg-panel', radius, className)}>

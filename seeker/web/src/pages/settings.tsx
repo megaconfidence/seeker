@@ -38,8 +38,8 @@ function Card({ id, title, description, children }: { id: string; title: string;
   return (
     <section id={id} className="mb-6 scroll-mt-6 rounded-lg border border-line">
       <div className="border-b border-line px-5 py-3.5">
-        <h2 className="text-[14px] font-semibold">{title}</h2>
-        {description && <p className="mt-0.5 text-[12.5px] text-muted">{description}</p>}
+        <h2 className="text-14 font-semibold">{title}</h2>
+        {description && <p className="mt-0.5 text-12.5 text-muted">{description}</p>}
       </div>
       <div className="divide-y divide-line px-5">{children}</div>
     </section>
@@ -86,7 +86,7 @@ function SectionNav() {
             document.getElementById(section.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
           }}
           className={clsx(
-            'rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors',
+            'rounded-md px-2.5 py-1.5 text-12.5 transition-colors',
             active === section.id ? 'bg-hover font-medium text-fg' : 'text-muted hover:text-fg',
           )}
         >
@@ -173,8 +173,8 @@ function QualityCard({ settings, save }: ReturnType<typeof useSettings> & { sett
         <div className="flex flex-col gap-1.5">
           {formats.map((format, index) => (
             <div key={format} className="flex h-9 items-center gap-3 rounded-md border border-line bg-raised pr-1 pl-3">
-              <span className="w-5 text-[12px] text-subtle tabular">{index + 1}</span>
-              <span className="flex-1 text-[13px] font-medium">{FORMAT_LABELS[format]}</span>
+              <span className="w-5 text-12 text-subtle tabular">{index + 1}</span>
+              <span className="flex-1 text-13 font-medium">{FORMAT_LABELS[format]}</span>
               <IconButton label="Move up" size="sm" disabled={index === 0} onClick={() => move(index, -1)}>
                 <ArrowUp className="size-3.5" />
               </IconButton>
@@ -193,7 +193,7 @@ function QualityCard({ settings, save }: ReturnType<typeof useSettings> & { sett
               key={format}
               type="button"
               onClick={() => set([...formats, format])}
-              className="h-7 rounded-full border border-dashed border-line-strong px-2.5 text-[12px] text-muted hover:border-solid hover:text-fg"
+              className="h-7 rounded-full border border-dashed border-line-strong px-2.5 text-12 text-muted hover:border-solid hover:text-fg"
             >
               + {FORMAT_LABELS[format]}
             </button>
@@ -236,7 +236,7 @@ function TextSetting({ value, onSave, placeholder, type = 'text', mono }: { valu
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => draft !== value && onSave(draft)}
       onKeyDown={(event) => event.key === 'Enter' && (event.target as HTMLInputElement).blur()}
-      className={clsx('w-full sm:w-80', mono && 'font-mono text-[12px]')}
+      className={clsx('w-full sm:w-80', mono && 'font-mono text-12')}
     />
   )
 }
@@ -297,9 +297,9 @@ function TokensCard() {
         </div>
         {created && (
           <div className="mt-3 rounded-md border border-warn/40 bg-warn/8 p-3">
-            <p className="text-[12.5px]">Copy this token now. It won’t be shown again.</p>
+            <p className="text-12.5">Copy this token now. It won’t be shown again.</p>
             <div className="mt-2 flex items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded bg-raised px-2 py-1.5 font-mono text-[12px]">{created}</code>
+              <code className="min-w-0 flex-1 truncate rounded bg-raised px-2 py-1.5 font-mono text-12">{created}</code>
               <IconButton label="Copy token" onClick={() => copy(created)}>
                 <Copy className="size-4" />
               </IconButton>
@@ -309,10 +309,10 @@ function TokensCard() {
         {tokens.data && tokens.data.length > 0 && (
           <div className="mt-4 flex flex-col divide-y divide-line rounded-md border border-line">
             {tokens.data.map((token) => (
-              <div key={token.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+              <div key={token.id} className="flex items-center gap-3 px-3 py-2 text-13">
                 <span className="font-medium">{token.name}</span>
-                <code className="font-mono text-[11.5px] text-subtle">{token.prefix}…</code>
-                <span className="ml-auto text-[12px] text-muted">
+                <code className="font-mono text-11.5 text-subtle">{token.prefix}…</code>
+                <span className="ml-auto text-12 text-muted">
                   {token.lastUsedAt ? `Used ${relativeTime(token.lastUsedAt)}` : `Created ${relativeTime(token.createdAt)}`}
                 </span>
                 <IconButton label="Revoke" size="sm" onClick={() => void askRevoke(token)}>
@@ -323,21 +323,21 @@ function TokensCard() {
           </div>
         )}
       </div>
-      <div className="py-4 text-[12.5px] text-muted">
+      <div className="py-4 text-12.5 text-muted">
         <p className="mb-2 font-medium text-fg">Connect an MCP client</p>
         <p>
           MCP endpoint: <code className="font-mono text-fg">{origin}/mcp</code> (streamable HTTP) with the token as a Bearer header. For Claude
           Code:
         </p>
         <div className="mt-2 flex items-center gap-2">
-          <code className="min-w-0 flex-1 overflow-x-auto rounded bg-raised px-2 py-1.5 font-mono text-[11.5px] whitespace-nowrap">{snippet}</code>
+          <code className="min-w-0 flex-1 overflow-x-auto rounded bg-raised px-2 py-1.5 font-mono text-11.5 whitespace-nowrap">{snippet}</code>
           <IconButton label="Copy command" onClick={() => copy(snippet)}>
             <Copy className="size-4" />
           </IconButton>
         </div>
         <p className="mt-4 mb-2">For clients configured with JSON:</p>
         <div className="flex items-start gap-2">
-          <code className="min-w-0 flex-1 overflow-x-auto rounded bg-raised px-2 py-1.5 font-mono text-[11.5px] whitespace-pre">{config}</code>
+          <code className="min-w-0 flex-1 overflow-x-auto rounded bg-raised px-2 py-1.5 font-mono text-11.5 whitespace-pre">{config}</code>
           <IconButton label="Copy configuration" onClick={() => copy(config)}>
             <Copy className="size-4" />
           </IconButton>
@@ -400,7 +400,7 @@ export function SettingsPage() {
   const sharing = slskd?.sharedFiles
 
   return (
-    <div className="grid max-w-[1000px] animate-content-in gap-10 lg:grid-cols-[minmax(0,1fr)_168px]">
+    <div className="grid max-w-250 animate-content-in gap-10 lg:grid-cols-[minmax(0,1fr)_10.5rem]">
       <div className="min-w-0">
         <PageHeader title="Settings" />
 
@@ -463,7 +463,7 @@ export function SettingsPage() {
               label="Search budget"
               hint="The Soulseek server bans clients that search too often, so Seeker paces its searches."
             >
-              <span className="text-[13px] text-muted tabular">
+              <span className="text-13 text-muted tabular">
                 {budget.used} of {budget.limit} used in the last 4 minutes{budget.waiting ? ` · ${budget.waiting} waiting` : ''}
               </span>
             </Field>
@@ -486,22 +486,22 @@ export function SettingsPage() {
             Object.values(info.data.folderProblems)
               .filter((problem): problem is string => !!problem)
               .map((problem) => (
-                <p key={problem} className="pt-4 text-[12.5px] text-bad">
+                <p key={problem} className="pt-4 text-12.5 text-bad">
                   {problem}
                 </p>
               ))}
           <div className="py-4">
-            <div className="text-[13px] font-medium">File names</div>
-            <div className="mt-0.5 mb-2 text-[12.5px] text-muted">
+            <div className="text-13 font-medium">File names</div>
+            <div className="mt-0.5 mb-2 text-12.5 text-muted">
               Use <code className="font-mono">{'{albumartist} {artist} {album} {year} {track} {disctrack} {title}'}</code>. Folders are separated with /.
               Changing this only affects new downloads.
             </div>
             <TextSetting value={settings.naming.template} mono onSave={(template) => save.mutate({ naming: { template } })} />
-            <p className="mt-2 font-mono text-[11.5px] text-subtle">{previewTemplate(settings.naming.template)}</p>
+            <p className="mt-2 font-mono text-11.5 text-subtle">{previewTemplate(settings.naming.template)}</p>
           </div>
           {info.data && (
             <Field label="Import folder" hint="Music you put here can be tagged and added to your library.">
-              <code className="font-mono text-[12px] text-muted">{info.data.importDir}</code>
+              <code className="font-mono text-12 text-muted">{info.data.importDir}</code>
               <Link to="/import">
                 <Button size="sm" variant="ghost">
                   Open
@@ -592,7 +592,7 @@ export function SettingsPage() {
                       const next = on ? settings.watchlist.types.filter((item) => item !== type) : [...settings.watchlist.types, type]
                       if (next.length) save.mutate({ watchlist: { types: next } })
                     }}
-                    className={clsx('h-7 rounded-full border px-2.5 text-[12px]', on ? 'border-fg/20 bg-hover text-fg' : 'border-line text-subtle')}
+                    className={clsx('h-7 rounded-full border px-2.5 text-12', on ? 'border-fg/20 bg-hover text-fg' : 'border-line text-subtle')}
                   >
                     {{ album: 'Albums', ep: 'EPs', single: 'Singles', compile: 'Compilations' }[type]}
                   </button>

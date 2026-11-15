@@ -110,6 +110,12 @@ reporting the last commit that built an image.
 
 - Colours come from the tokens in `web/src/styles.css`: `bg`, `panel`, `raised`, `hover`, `line`, `line-strong`,
   `fg`, `muted`, `subtle`, `accent`, `ok`, `warn`, `bad`, `inverse`. Light and dark follow the system setting.
+- Size everything in rem: Tailwind's spacing (`h-18`, `max-w-85`, `translate-x-4.5`) and the text tokens in
+  `styles.css`, named after their size in px at a 16px root (`text-13`, `text-12.5`). The root font size draws the
+  whole interface at 110% on a desktop (the owner's choice, like 110% browser zoom) and 115% on touch screens
+  (`pointer: coarse`), where desktop sizes are small; a px value doesn't grow with it. Arbitrary values use rem too
+  (`grid-cols-[1.75rem_1fr]`). px is only for hairlines, outlines and blurs. A text size that isn't in the tokens gets
+  a new token.
 - Motion uses the `animate-*` utilities defined in `styles.css` (`page-in`, `pop-in`, `sheet-in`…). For exit
   animations, keep the element mounted with `usePresence` from `lib/presence.ts`. Reduced motion turns all of it off.
 - Use the in-app `Dialog` and `useConfirm`, never `window.confirm`. Notifications go through `useToast`, with actions

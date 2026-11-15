@@ -62,7 +62,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={toast.id}
             className={clsx(
-              'pointer-events-auto flex max-w-md items-center gap-2.5 rounded-lg border border-line-strong bg-raised py-2 pr-1.5 pl-3.5 text-[13px] shadow-lg shadow-black/20',
+              'pointer-events-auto flex max-w-md items-center gap-2.5 rounded-lg border border-line-strong bg-raised py-2 pr-1.5 pl-3.5 text-13 shadow-lg shadow-black/20',
               toast.leaving ? 'pointer-events-none animate-toast-out' : 'animate-toast-in',
             )}
           >
@@ -80,7 +80,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   action!.onClick()
                   dismiss(toast.id)
                 }}
-                className="shrink-0 rounded-md px-2 py-1 text-[12.5px] font-medium text-fg hover:bg-hover"
+                className="shrink-0 rounded-md px-2 py-1 text-12.5 font-medium text-fg hover:bg-hover"
               >
                 {action!.label}
               </button>
