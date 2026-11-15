@@ -164,8 +164,11 @@ reporting the last commit that built an image.
   than half the tracks (and at least 100) would go, unless `force` is passed; unreadable subfolders keep their rows.
   The refusal is `library.problem` in the status. Never `mkdir` the music folder: that hides a missing mount, and
   `processJob()` refuses to file while `musicFolderProblem()` reports one.
-- Music-folder failures keep jobs in `processing` with downloaded rows intact. `next_retry_at` persists the ten-minute
-  processing retry; `retryJob()` resumes those files directly. Never settle or clean up a job waiting for music.
+- Storage failures keep jobs in `processing` with downloaded rows intact: an unavailable music folder (permissions, a
+  lost mount, `ESTALE`, `ENOTCONN`…) or no space (`ENOSPC`/`EDQUOT`, wherever it happens, including tagging and the
+  temporary copies in the data folder). `next_retry_at` persists the ten-minute processing retry and `waiting_for`
+  why; `retryJob()` resumes those files directly. Never settle or clean up a waiting job: settling deletes the
+  downloads. A download that vanished (`ENOENT` with the source gone) is a failed file, not a wait.
 - Library scans prepare album metadata before changing SQLite. Track upserts, removals and album rows commit in one
   synchronous transaction; never hold a SQLite transaction across asynchronous filesystem work.
 - Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,

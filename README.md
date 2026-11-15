@@ -331,10 +331,12 @@ and download files Seeker can access; check their permissions before switching.
   **Settings → Soulseek** and let slskd rescan on a schedule with `SLSKD_SHARE_CACHE_RETENTION` (in minutes; see
   [share cache](https://github.com/slskd/slskd/blob/master/docs/config.md#cache) in slskd's docs). New music is then shared
   after slskd's next rescan, or when you press **Rescan**. Downloads that start while slskd is busy wait for it.
-- **A download says "Waiting for the music folder"**: the music folder is missing, empty, read-only or temporarily
-  unavailable. Seeker keeps the downloaded files and any tracks already filed, then retries every 10 minutes. Fix
-  the mount or permissions and press **Try again** in Downloads to resume immediately, without downloading again.
-  Cancelling the job explicitly removes its downloaded files.
+- **A download says "Waiting for the music folder" or "Waiting for free space"**: the music folder is missing, empty,
+  read-only or temporarily unavailable, or a disk Seeker writes to is full or over its quota (the music folder, the
+  downloads folder, or Seeker's data folder, where it makes temporary copies). Seeker keeps the downloaded files and
+  any tracks already filed, then retries every 10 minutes. Fix the mount or permissions, or free some space, and press
+  **Try again** in Downloads to resume immediately, without downloading again. Cancelling the job explicitly removes
+  its downloaded files.
 - **The library stopped updating**: Seeker can't see your music, usually because a network share isn't mounted, so
   it keeps the index. It looks again every 10 minutes, or press **Rescan** on the Library page.
 - **AcoustID says the key is invalid**: use an application key, not your user key.

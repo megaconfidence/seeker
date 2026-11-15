@@ -19,7 +19,7 @@ import { onSoulseekReady, soulseekReady } from '../status.ts'
 import { errorMessage, sleep } from '../util.ts'
 import { processJob } from './process.ts'
 import * as store from './store.ts'
-import type { FileRow, JobRow } from './store.ts'
+import { WAIT_PHASES, type FileRow, type JobRow, type WaitReason } from './store.ts'
 
 const log = logger('engine')
 
@@ -792,9 +792,16 @@ function finishDownloading(jobId: string) {
 
 let processingRunning = false
 let processingTimer: ReturnType<typeof setTimeout> | undefined
+const PROCESSING_RETRY_MS = 10 * 60_000
 
 function kickProcessing() {
   void runProcessing()
+}
+
+// The downloads stay where they are; processing tries again later, or when the user presses Try again.
+function waitToProcess(jobId: string, reason: WaitReason) {
+  store.patchJob(jobId, { next_retry_at: Date.now() + PROCESSING_RETRY_MS, waiting_for: reason })
+  store.setPhase(jobId, WAIT_PHASES[reason])
 }
 
 async function runProcessing() {
@@ -805,20 +812,19 @@ async function runProcessing() {
       const job = get<JobRow>("SELECT * FROM jobs WHERE status = 'processing' AND (next_retry_at IS NULL OR next_retry_at <= ?) ORDER BY updated_at LIMIT 1", [Date.now()])
       if (!job) break
       let failedTracks: number[] = []
-      let waitingForMusic = false
+      let waitingFor: WaitReason | undefined
       try {
-        ;({ failedTracks, waitingForMusic = false } = await processJob(job.id))
+        ;({ failedTracks, waitingFor } = await processJob(job.id))
       } catch (error) {
         log.error(`Processing ${job.id} failed`, error)
         store.logJob(job.id, 'error', `Post-processing failed: ${errorMessage(error)}`)
       }
       if (!stillActive(job.id)) continue
-      if (waitingForMusic) {
-        store.patchJob(job.id, { next_retry_at: Date.now() + 10 * 60_000 })
-        store.setPhase(job.id, 'Waiting for the music folder')
+      if (waitingFor) {
+        waitToProcess(job.id, waitingFor)
         continue
       }
-      store.patchJob(job.id, { next_retry_at: null, error: null })
+      store.patchJob(job.id, { next_retry_at: null, waiting_for: null, error: null })
       const runtime = rt(job.id)
       for (const row of store.jobFiles(job.id)) if (row.state === 'failed') runtime.used.add(candidateKey(row))
       if (failedTracks.length && job.kind !== 'files') {
@@ -1210,7 +1216,7 @@ export async function cancelJob(jobId: string) {
   }
   for (let i = replaceTasks.length - 1; i >= 0; i--) if (replaceTasks[i]!.jobId === jobId) replaceTasks.splice(i, 1)
   if (!['completed'].includes(job.status)) {
-    store.patchJob(jobId, { status: 'cancelled', next_retry_at: null })
+    store.patchJob(jobId, { status: 'cancelled', next_retry_at: null, waiting_for: null })
     store.logJob(jobId, 'info', 'Cancelled')
   }
   store.setPhase(jobId, null)
@@ -1221,7 +1227,7 @@ export async function cancelJob(jobId: string) {
 export function retryJob(jobId: string) {
   const job = store.getJob(jobId)
   if (job?.status === 'processing' && job.next_retry_at !== null) {
-    store.patchJob(jobId, { next_retry_at: null, error: null })
+    store.patchJob(jobId, { next_retry_at: null, waiting_for: null, error: null })
     store.setPhase(jobId, 'Retrying files already downloaded')
     kickProcessing()
     return
@@ -1269,9 +1275,6 @@ function wishlistTick() {
 export function startEngine() {
   for (const row of all<{ id: string }>("SELECT id FROM jobs WHERE status = 'searching'")) {
     store.patchJob(row.id, { status: 'queued' })
-  }
-  for (const row of all<{ id: string }>("SELECT id FROM jobs WHERE status = 'processing' AND next_retry_at IS NOT NULL")) {
-    store.setPhase(row.id, 'Waiting for the music folder')
   }
   onSoulseekReady(() => kick())
   setInterval(() => void monitorTick(), config.timing.pollMs).unref()

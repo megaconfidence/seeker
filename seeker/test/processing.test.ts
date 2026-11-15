@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import fsSync from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
 import { promisify } from 'node:util'
+import { parseFile } from 'music-metadata'
 import { FakeSlskd } from './fakes/slskd.ts'
 
 const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'seeker-processing-')))
@@ -53,12 +55,33 @@ async function downloaded(title: string, count = 1) {
   return { job, dir, files }
 }
 
-async function waiting(jobId: string) {
+// A one-track album job, so the download is tagged before it's filed.
+async function downloadedAlbum(title: string) {
+  updateSettings({ naming: { template: '{albumartist}/{album}/{disctrack} - {title}' } })
+  const target = {
+    album: { title, artist: 'Test Artist', trackCount: 1, discCount: 1, mbChecked: true },
+    tracks: [{ index: 0, title: 'Song', artist: 'Test Artist', disc: 1, track: 1, duration: 1 }],
+  }
+  const job = store.insertJob({ kind: 'album', status: 'processing', title, artist: 'Test Artist', origin: 'ui', target })
+  store.patchJob(job.id, { next_retry_at: Date.now() + 60_000 })
+  const dir = path.join(dirs.downloads, 'seeker', job.id)
+  await fs.mkdir(dir, { recursive: true })
+  const file = path.join(dir, '01 - Song.mp3')
+  await fs.copyFile(fixture, file)
+  store.insertFile(job.id, { trackIndex: 0, username: 'peer', filename: 'Album\\01 - Song.mp3', size: (await fs.stat(file)).size, transferId: null, state: 'downloaded' })
+  return { job, dir, file, filed: path.join(dirs.music, 'Test Artist', title, '01 - Song.mp3') }
+}
+
+const noSpace = (code = 'ENOSPC') => Object.assign(new Error(`${code}: no space left on device`), { code })
+const MUSIC = 'Waiting for the music folder'
+const SPACE = 'Waiting for free space'
+
+async function waiting(jobId: string, phase = MUSIC) {
   engine.retryJob(jobId)
   await waitFor(() => store.getJob(jobId)?.next_retry_at !== null && !!store.getJob(jobId)?.error)
   const job = store.getJob(jobId)!
   assert.equal(job.status, 'processing')
-  assert.equal(store.toJob(job).phase, 'Waiting for the music folder')
+  assert.equal(store.toJob(job).phase, phase)
   assert.ok(job.next_retry_at! > Date.now())
 }
 
@@ -123,7 +146,13 @@ test('a read-only album destination preserves downloaded files', { skip: asRoot 
   await resume(job.id)
 })
 
-for (const code of ['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE', 'EIO']) {
+const DESTINATION_ERRORS: [string, string][] = [
+  ...['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE', 'EIO', 'ETIMEDOUT', 'ENOTCONN'].map((code): [string, string] => [code, MUSIC]),
+  ['ENOSPC', SPACE],
+  ['EDQUOT', SPACE],
+]
+
+for (const [code, phase] of DESTINATION_ERRORS) {
   test(`a destination ${code} preserves the remaining downloads after a partial import`, async (t) => {
     const { job, files } = await downloaded(`Transient ${code}`, 2)
     // Different filenames without complete tags make the fallback keep both tracks distinct.
@@ -140,7 +169,7 @@ for (const code of ['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE', 'EIO']) {
     writeTags(files[1]!, { title: 'Second Song', artists: ['Test Artist'], albumArtist: 'Test Artist', album: 'Waiting Album', year: null, track: 2, trackCount: 2, disc: 1, discCount: 1, genres: [] })
     store.patchFile(store.jobFiles(job.id)[1]!.id, { size: (await fs.stat(files[1]!)).size })
     try {
-      await waiting(job.id)
+      await waiting(job.id, phase)
       assert.deepEqual(store.jobFiles(job.id).map((file) => file.state), ['imported', 'downloaded'])
       await fs.access(files[1]!)
     } finally {
@@ -149,6 +178,98 @@ for (const code of ['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE', 'EIO']) {
     await resume(job.id)
   })
 }
+
+test('no space while tagging a copy of a read-only download keeps it, and the reason survives a restart', { skip: asRoot }, async (t) => {
+  const { job, file, filed } = await downloadedAlbum('Full data folder')
+  await fs.chmod(file, 0o444)
+  const realCopy = fs.copyFile.bind(fs)
+  // The tagged copy goes to Seeker's data folder, which is full.
+  const copy = t.mock.method(fs, 'copyFile', async (...args: Parameters<typeof fs.copyFile>) => {
+    if (String(args[1]).startsWith(dirs.data)) throw noSpace()
+    return realCopy(...args)
+  })
+  try {
+    await waiting(job.id, SPACE)
+    assert.match(store.getJob(job.id)!.error ?? '', /There isn’t enough free space to file new music: ENOSPC/)
+    assert.equal(store.jobFiles(job.id)[0]!.state, 'downloaded')
+    assert.deepEqual(await fs.readFile(file), await fs.readFile(fixture))
+    // After a restart only the stored reason is left to say why the job waits.
+    store.setPhase(job.id, null)
+    assert.equal(store.toJob(store.getJob(job.id)!).phase, SPACE)
+  } finally {
+    copy.mock.restore()
+  }
+  await resume(job.id)
+  assert.equal((await parseFile(filed)).common.album, 'Full data folder', 'the filed copy has the new tags')
+})
+
+for (const code of ['ENOSPC', 'EDQUOT']) {
+  test(`${code} while tagging a download in place keeps it instead of filing it with its old tags`, async (t) => {
+    const { job, file, filed } = await downloadedAlbum(`Tag ${code}`)
+    // node-taglib-sharp writes through fs.writeSync.
+    const write = t.mock.method(fsSync, 'writeSync', () => {
+      throw noSpace(code)
+    })
+    try {
+      await waiting(job.id, SPACE)
+      assert.equal(store.jobFiles(job.id)[0]!.state, 'downloaded')
+      await fs.access(file)
+      await assert.rejects(fs.access(filed), 'nothing was filed')
+    } finally {
+      write.mock.restore()
+    }
+    await resume(job.id)
+    assert.equal((await parseFile(filed)).common.album, `Tag ${code}`)
+  })
+}
+
+test('no space during a copy-mode import keeps the job waiting and the originals untouched', async (t) => {
+  updateSettings({ naming: { template: '{albumartist}/{album}/{disctrack} - {title}' } })
+  const original = path.join(dirs.import, 'Copy Import', '01 - Song.mp3')
+  await fs.mkdir(path.dirname(original), { recursive: true })
+  await fs.copyFile(fixture, original)
+  const target = {
+    album: { title: 'Copy Import', artist: 'Test Artist', trackCount: 1, discCount: 1, mbChecked: true },
+    tracks: [{ index: 0, title: 'Song', artist: 'Test Artist', disc: 1, track: 1, duration: 1 }],
+    importMode: 'copy' as const,
+  }
+  const job = store.insertJob({ kind: 'import', status: 'processing', title: 'Copy Import', artist: 'Test Artist', origin: 'ui', target })
+  store.patchJob(job.id, { next_retry_at: Date.now() + 60_000 })
+  const row = store.insertFile(job.id, { trackIndex: 0, username: 'local', filename: original, size: (await fs.stat(original)).size, transferId: null, state: 'downloaded' })
+  store.patchFile(row, { local_path: original })
+  const realCopy = fs.copyFile.bind(fs)
+  const copy = t.mock.method(fs, 'copyFile', async (...args: Parameters<typeof fs.copyFile>) => {
+    if (String(args[1]).startsWith(dirs.data)) throw noSpace()
+    return realCopy(...args)
+  })
+  try {
+    await waiting(job.id, SPACE)
+    assert.equal(store.jobFiles(job.id)[0]!.state, 'downloaded')
+  } finally {
+    copy.mock.restore()
+  }
+  await resume(job.id)
+  assert.deepEqual(await fs.readFile(original), await fs.readFile(fixture), 'copy mode leaves the original alone')
+  await fs.access(path.join(dirs.music, 'Test Artist', 'Copy Import', '01 - Song.mp3'))
+})
+
+test('a download that vanishes just before the move fails instead of waiting for the music folder', async (t) => {
+  const { job } = await downloaded('Vanished')
+  const rename = t.mock.method(fs, 'rename', async (...args: Parameters<typeof fs.rename>) => {
+    await fs.rm(String(args[0]), { force: true })
+    throw Object.assign(new Error('ENOENT: no such file or directory, rename'), { code: 'ENOENT' })
+  })
+  try {
+    engine.retryJob(job.id)
+    await waitFor(() => store.getJob(job.id)?.status === 'failed')
+  } finally {
+    rename.mock.restore()
+  }
+  const row = store.jobFiles(job.id)[0]!
+  assert.equal(row.state, 'failed')
+  assert.match(row.error ?? '', /disappeared before Seeker could file it/)
+  assert.equal(store.getJob(job.id)!.next_retry_at, null)
+})
 
 test('explicit cancellation may remove downloads waiting for the music folder', async () => {
   const { job, dir } = await downloaded('Cancel waiting')

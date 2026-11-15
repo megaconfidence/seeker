@@ -168,6 +168,10 @@ const migrations = [
   CREATE INDEX jobs_mb ON jobs(mb_release_id);
   ALTER TABLE imports ADD COLUMN mb_release_id TEXT;
   `,
+  // Why a downloaded job is waiting to be filed (jobs/store.ts WaitReason); null when it isn't.
+  `
+  ALTER TABLE jobs ADD COLUMN waiting_for TEXT;
+  `,
 ]
 
 const { user_version: current } = db.prepare('PRAGMA user_version').get() as { user_version: number }

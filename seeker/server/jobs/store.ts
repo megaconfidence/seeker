@@ -14,6 +14,14 @@ import type {
 import { all, exec, get } from '../db.ts'
 import { emit } from '../events.ts'
 
+// Downloads that can't be filed yet are kept, and the job waits in `processing` until next_retry_at.
+export type WaitReason = 'music' | 'space'
+
+export const WAIT_PHASES: Record<WaitReason, string> = {
+  music: 'Waiting for the music folder',
+  space: 'Waiting for free space',
+}
+
 export interface JobRow {
   id: string
   kind: JobKind
@@ -33,6 +41,8 @@ export interface JobRow {
   attempts: number
   error: string | null
   next_retry_at: number | null
+  // Rows from before this column existed are null; they could only wait for the music folder.
+  waiting_for: WaitReason | null
   created_at: number
   updated_at: number
   started_at: number | null
@@ -226,7 +236,7 @@ export function toJob(row: JobRow, files = jobFiles(row.id)): Job {
     origin: row.origin,
     attempts: row.attempts,
     error: row.error,
-    phase: phases.get(row.id) ?? (row.status === 'processing' && row.next_retry_at !== null ? 'Waiting for the music folder' : null),
+    phase: phases.get(row.id) ?? (row.status === 'processing' && row.next_retry_at !== null ? WAIT_PHASES[row.waiting_for ?? 'music'] : null),
     nextRetryAt: row.next_retry_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

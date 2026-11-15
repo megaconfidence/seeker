@@ -25,7 +25,7 @@ import { getSettings } from '../settings.ts'
 import { slskd } from '../soulseek/slskd.ts'
 import { errorMessage, yearOf } from '../util.ts'
 import * as store from './store.ts'
-import type { FileRow, JobRow } from './store.ts'
+import { WAIT_PHASES, type FileRow, type JobRow, type WaitReason } from './store.ts'
 
 const log = logger('process')
 
@@ -221,6 +221,8 @@ async function tagForLibrary(file: string, data: TagData, cover: Buffer | null, 
     writeTags(file, data, cover)
     return { file, info: null, note: null }
   } catch (error) {
+    // Out of space: freeing some fixes it, so the job waits rather than filing the old tags.
+    if (NO_SPACE.has(errorCode(error))) throw error
     if (!isPermissionError(error)) return { file, info: null, note: `filed without new tags (${errorMessage(error)})` }
     const dir = path.dirname(file)
     if (folderProblem(dir)) {
@@ -256,12 +258,23 @@ async function replaceOldTrack(albumId: string, track: TargetTrack, destination:
   return true
 }
 
-const MUSIC_ERRORS = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE', 'EIO'])
+// The music folder can't be used right now (a share that went away, a permission change); the
+// download itself is fine.
+const MUSIC_UNAVAILABLE = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE', 'EIO', 'ETIMEDOUT', 'ENOTCONN'])
+// Out of space or over quota. Wherever it happens (the music folder, the download being tagged, or
+// Seeker's own copies in its data folder), freeing space fixes it.
+const NO_SPACE = new Set(['ENOSPC', 'EDQUOT'])
+const errorCode = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code ?? ''
 
-function waitForMusic(jobId: string, message: string) {
-  if (store.getJob(jobId)?.error !== message) store.logJob(jobId, 'warn', `${message} Downloads are kept; retry once the folder is back.`)
+const WAIT_HINTS: Record<WaitReason, string> = {
+  music: 'retry once the folder is back',
+  space: 'retry once there’s free space',
+}
+
+function waitFor(jobId: string, reason: WaitReason, message: string) {
+  if (store.getJob(jobId)?.error !== message) store.logJob(jobId, 'warn', `${message} Downloads are kept; ${WAIT_HINTS[reason]}.`)
   store.patchJob(jobId, { error: message })
-  store.setPhase(jobId, 'Waiting for the music folder')
+  store.setPhase(jobId, WAIT_PHASES[reason])
 }
 
 // Check the nearest existing destination folder without creating anything on a missing mount.
@@ -278,7 +291,9 @@ async function checkDestination(destination: string) {
   }
 }
 
-export async function processJob(jobId: string): Promise<{ failedTracks: number[]; waitingForMusic?: boolean }> {
+// `waitingFor` means some downloads couldn't be filed yet: they stay `downloaded`, and the caller
+// tries again later instead of finishing the job (which would delete them).
+export async function processJob(jobId: string): Promise<{ failedTracks: number[]; waitingFor?: WaitReason }> {
   const job = store.getJob(jobId)
   if (!job) return { failedTracks: [] }
   const settings = getSettings()
@@ -289,14 +304,14 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
   const failedTracks: number[] = []
   const imported: string[] = []
   let touchedLibrary = false
-  let waitingForMusic = false
+  let waitingFor: WaitReason | undefined
 
   // Filing into a share that isn't mounted would put music where nobody looks for it (or inside
   // the container), so nothing moves until the folder is back.
   const musicProblem = rows.length ? await musicFolderProblem() : null
   if (musicProblem) {
-    waitForMusic(jobId, musicProblem)
-    return { failedTracks, waitingForMusic: true }
+    waitFor(jobId, 'music', musicProblem)
+    return { failedTracks, waitingFor: 'music' }
   }
 
   if (target && rows.some((row) => row.track_index !== null)) {
@@ -313,8 +328,8 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
     if (store.getJob(jobId)?.status === 'cancelled') break
     const musicProblem = await musicFolderProblem()
     if (musicProblem) {
-      waitForMusic(jobId, musicProblem)
-      waitingForMusic = true
+      waitFor(jobId, 'music', musicProblem)
+      waitingFor = 'music'
       break
     }
     const track = target && row.track_index !== null ? (target.tracks[row.track_index] ?? null) : null
@@ -338,6 +353,8 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
     }
 
     let working = local
+    // The file being read or moved, to tell a download that vanished from a missing music folder.
+    let current = local
     let onMusic = insideLibrary(local)
     let filedIntoLibrary = false
     try {
@@ -346,6 +363,7 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
         await fs.mkdir(tempDir, { recursive: true })
         working = path.join(tempDir, `${row.id}${path.extname(local)}`)
         await fs.copyFile(local, working)
+        current = working
       }
       const info = await probe(working)
       const verdict = await verify(working, info, track, settings.checks, isImport)
@@ -401,6 +419,7 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
         const copy = path.join(config.dataDir, 'tmp', jobId, `${row.id}-tagged${path.extname(working)}`)
         const tagged = await tagForLibrary(working, tagsFor(target, track), cover, copy, isImport)
         filed = tagged.file
+        current = filed
         note = tagged.note
         if (tagged.info) store.logJob(jobId, 'info', `${name}: ${tagged.info}`)
         if (note) store.logJob(jobId, 'warn', `${name}: ${note}`)
@@ -409,8 +428,8 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
         onMusic = true
         const musicProblem = await musicFolderProblem()
         if (musicProblem) {
-          waitForMusic(jobId, musicProblem)
-          waitingForMusic = true
+          waitFor(jobId, 'music', musicProblem)
+          waitingFor = 'music'
           break
         }
         const leftover = await moveFile(filed, destination)
@@ -446,17 +465,28 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
       }
     } catch (error) {
       if (copyMode) await fs.rm(working, { force: true }).catch(() => {})
-      if (onMusic && MUSIC_ERRORS.has((error as NodeJS.ErrnoException).code ?? '')) {
-        waitForMusic(jobId, `New music can’t be filed into ${config.musicDir}: ${fileErrorMessage(error)}`)
-        waitingForMusic = true
-        break
-      }
+      // The track is in the library already; a failed cleanup mustn't hold up the other downloads.
       if (filedIntoLibrary) {
         store.logJob(jobId, 'warn', `${name}: filed, but cleanup failed (${fileErrorMessage(error)})`)
         continue
       }
-      store.patchFile(row.id, { state: 'failed', error: fileErrorMessage(error) })
-      store.logJob(jobId, 'error', `${name}: ${fileErrorMessage(error)}`)
+      const code = errorCode(error)
+      if (NO_SPACE.has(code)) {
+        waitFor(jobId, 'space', `There isn’t enough free space to file new music: ${errorMessage(error)}.`)
+        waitingFor = 'space'
+        break
+      }
+      // ENOENT can also mean the download vanished just before the move. Waiting for the music
+      // folder wouldn't bring it back, so that's a failed download.
+      const vanished = code === 'ENOENT' && !(await exists(current))
+      if (onMusic && MUSIC_UNAVAILABLE.has(code) && !vanished) {
+        waitFor(jobId, 'music', `New music can’t be filed into ${config.musicDir}: ${fileErrorMessage(error)}`)
+        waitingFor = 'music'
+        break
+      }
+      const message = vanished ? `the file disappeared before Seeker could file it (${errorMessage(error)})` : fileErrorMessage(error)
+      store.patchFile(row.id, { state: 'failed', error: message })
+      store.logJob(jobId, 'error', `${name}: ${message}`)
     }
   }
   // Copies made for copy-mode imports, and tagged copies of files Seeker couldn't change.
@@ -473,8 +503,8 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
     scheduleJellyfinRefresh()
     store.logJob(jobId, 'info', `Added ${imported.length} ${imported.length === 1 ? 'track' : 'tracks'} to your library`)
   }
-  if (waitingForMusic) store.setPhase(jobId, 'Waiting for the music folder')
-  return { failedTracks, waitingForMusic }
+  if (waitingFor) store.setPhase(jobId, WAIT_PHASES[waitingFor])
+  return { failedTracks, waitingFor }
 }
 
 export type { JobRow }
