@@ -194,7 +194,8 @@ Everything else is in **Settings** in the app:
 The share quiet period is between 1 minute and 24 hours; saved values outside that are brought within it. Use
 **Rescan shares automatically** to disable automatic scans. Initial indexing normally avoids a rescan of music slskd
 already shares. **Rescan after first library scan** opts into it; if slskd shares nothing, Seeker still schedules a
-rescan after initial indexing.
+rescan after initial indexing. If slskd later stops sharing anything while your library has music (after losing its
+share cache, say), Seeker asks for one rescan.
 
 ## How a download works
 

@@ -24,10 +24,9 @@ after(async () => {
 
 async function reset() {
   updateSettings({ shares: { autoRescan: false } })
-  if (shares.shareRescanStatus().pending) {
-    await shares.rescanSharesNow()
-    shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() + 1 })
-  }
+  if (shares.shareRescanStatus().pending) await shares.rescanSharesNow()
+  // Ends any scan an earlier test left running.
+  shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() + 1 })
   exec('DELETE FROM lib_tracks')
   exec('DELETE FROM lib_albums')
   exec("DELETE FROM meta WHERE key = 'library_indexed'")
@@ -68,6 +67,29 @@ test('initial indexing waits for status instead of guessing that shares are empt
   assert.equal(shares.shareRescanStatus().scheduledAt, null)
   shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now(), sharedFiles: 0 })
   assert.ok(shares.shareRescanStatus().scheduledAt)
+})
+
+test('the first-index decision waits for a recent share count, not an old one', async () => {
+  await reset()
+  // Status polls come every 10 s, so a count from a minute ago may no longer be true.
+  shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() - 60_000, sharedFiles: 0 })
+  await fs.writeFile(path.join(music, 'existing.mp3'), '')
+  await scanLibrary()
+  assert.equal(shares.shareRescanStatus().scheduledAt, null)
+  shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now(), sharedFiles: 0 })
+  assert.ok(shares.shareRescanStatus().scheduledAt)
+})
+
+test('the first-index decision ignores what slskd shares while it scans', async () => {
+  await reset()
+  shares.noteSlskdShares({ reachable: true, scanning: true, at: Date.now(), sharedFiles: 0 })
+  await fs.writeFile(path.join(music, 'existing.mp3'), '')
+  await scanLibrary()
+  assert.equal(shares.shareRescanStatus().scheduledAt, null)
+  // slskd's scan ends with the music shared, so there's nothing to ask for.
+  shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() + 1, sharedFiles: 42 })
+  assert.equal(shares.shareRescanStatus().pending, false)
+  assert.equal(shares.shareRescanStatus().scheduledAt, null)
 })
 
 test('rescanOnFirstScan explicitly opts into the first rescan', async () => {

@@ -207,6 +207,8 @@ export class FakeSlskd {
   shareRescanConflicts = 0
   // How long a share scan takes. While one runs, GET application reports shares.scanning.
   shareScanMs = 0
+  // What GET application says slskd shares.
+  sharedFiles = 42
   #scanningUntil = 0
   #server: http.Server
   #lock: Promise<unknown> = Promise.resolve()
@@ -330,7 +332,7 @@ export class FakeSlskd {
         isLoggedIn: true,
         isTransitioning: false,
       },
-      shares: { scanning: this.scanningShares, directories: 1, files: 42 },
+      shares: { scanning: this.scanningShares, directories: 1, files: this.sharedFiles },
     }
   }
 

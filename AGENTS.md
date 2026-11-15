@@ -136,6 +136,8 @@ reporting the last commit that built an image.
 - Share quiet periods stay within 1–1440 minutes, including old or hand-edited saved settings: outside that, a timer
   fires at once (a `setTimeout` beyond about 24.8 days overflows to 1 ms). Initial indexing doesn't change audio files,
   so it only requests a rescan when `shares.rescanOnFirstScan` is on or slskd reports zero shared files.
+- Only trust what slskd says it shares when the count is recent and slskd isn't scanning: counts mid-scan are partial.
+  `status.ts` asks for one rescan when shares drop to nothing (`sharesLost()`), never one per poll.
 - A search that fails because slskd didn't answer (a `SlskdError` with status 0) sends the download back to the queue
   to wait for slskd, never to the wishlist.
 - A Soulseek account allows one session. Signing in elsewhere logs slskd out.

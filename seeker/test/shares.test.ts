@@ -36,6 +36,7 @@ const { updateSettings } = await import('../server/settings.ts')
 const shares = await import('../server/shares.ts')
 const store = await import('../server/jobs/store.ts')
 const { startStatus } = await import('../server/status.ts')
+const { exec } = await import('../server/db.ts')
 const { slskd: api, SlskdError } = await import('../server/soulseek/slskd.ts')
 
 // Each minute is shortened to 300 ms, without accepting sub-minute settings.
@@ -165,6 +166,56 @@ for (const fresh of [false, true]) {
     await quiet()
   })
 }
+
+test('shares count as lost when they drop to nothing, or are nothing at the first look; not while they stay empty', () => {
+  assert.equal(shares.sharesLost(42, 0), true)
+  assert.equal(shares.sharesLost(null, 0), true)
+  assert.equal(shares.sharesLost(0, 0), false)
+  assert.equal(shares.sharesLost(null, 42), false)
+  assert.equal(shares.sharesLost(0, 42), false)
+})
+
+// The library needs music for lost shares to matter.
+async function withLibraryTrack(run: () => Promise<void>) {
+  exec(
+    `INSERT INTO lib_tracks (path, album_id, mtime, size, title, artist, album, album_artist, norm_artist, norm_title, has_cover, added_at)
+     VALUES (?, 'album', 0, 0, 'Song', 'Artist', 'Album', 'Artist', 'artist', 'song', 0, 0)`,
+    [path.join(dirs.music, 'song.mp3')],
+  )
+  try {
+    await run()
+  } finally {
+    slskd.sharedFiles = 42
+    exec('DELETE FROM lib_tracks')
+  }
+}
+
+test('slskd losing its shares asks for one rescan, not one per poll', async () => {
+  await quiet()
+  await withLibraryTrack(async () => {
+    const before = slskd.shareRescans
+    slskd.sharedFiles = 0
+    await waitFor('a rescan for the lost shares', () => slskd.shareRescans === before + 1)
+    // Polls every 50 ms keep reporting nothing shared, long past the 300 ms quiet period.
+    await sleep(800)
+    assert.equal(slskd.shareRescans, before + 1)
+    assert.equal(shares.shareRescanStatus().scheduledAt, null)
+  })
+})
+
+test('nothing shared while slskd is scanning isn’t taken as lost shares', async () => {
+  await quiet()
+  await withLibraryTrack(async () => {
+    const before = slskd.shareRescans
+    slskd.startShareScan(500)
+    slskd.sharedFiles = 0
+    await sleep(250)
+    slskd.sharedFiles = 42
+    await waitFor('slskd’s scan to end', () => !slskd.scanningShares && !shares.shareRescanStatus().running)
+    await sleep(500)
+    assert.equal(slskd.shareRescans, before)
+  })
+})
 
 test('legacy zero quiet periods are normalized and never schedule an immediate follow-up', async () => {
   await quiet()

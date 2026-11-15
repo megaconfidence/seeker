@@ -4,7 +4,7 @@ import { emit } from './events.ts'
 import { statusCounts } from './jobs/store.ts'
 import { libraryCounts, libraryStatus } from './library/scan.ts'
 import { logger } from './log.ts'
-import { noteLibraryChange, noteSlskdShares, onShareRescanChange, shareRescanStatus } from './shares.ts'
+import { noteLibraryChange, noteSlskdShares, onShareRescanChange, shareRescanStatus, sharesLost } from './shares.ts'
 import { slskd } from './soulseek/slskd.ts'
 import { errorMessage } from './util.ts'
 
@@ -26,7 +26,8 @@ let current: SlskdStatus = offline(config.slskdApiKey ? null : 'SLSKD_API_KEY is
 let username: { value: string | null; at: number } = { value: null, at: 0 }
 const readyListeners = new Set<() => void>()
 let failures = 0
-let checkedShares = false
+// What slskd last said it shares while it wasn't scanning (mid-scan counts are partial).
+let settledShares: number | null = null
 
 export function onSoulseekReady(listener: () => void) {
   readyListeners.add(listener)
@@ -75,10 +76,9 @@ async function poll() {
     }
     failures = 0
     noteSlskdShares({ reachable: true, scanning: next.scanningShares, at, sharedFiles: next.sharedFiles })
-    // slskd only scans shares at startup; if it shares nothing but the library has music, rescan.
-    if (!checkedShares && libraryCounts().tracks > 0) {
-      checkedShares = true
-      if (next.sharedFiles === 0 && !next.scanningShares && libraryCounts().tracks > 0) noteLibraryChange()
+    if (!next.scanningShares && next.sharedFiles !== null) {
+      if (sharesLost(settledShares, next.sharedFiles) && libraryCounts().tracks > 0) noteLibraryChange()
+      settledShares = next.sharedFiles
     }
   } catch (error) {
     failures++

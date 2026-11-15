@@ -95,9 +95,19 @@ export function noteInitialLibrary() {
 }
 
 function checkInitialLibrary() {
-  if (!initialIndexPending || !lastPoll.reachable || lastPoll.sharedFiles === null) return
+  // Only a recent count from slskd while it isn't scanning will do: counts mid-scan are partial,
+  // and an old one may no longer be true. Otherwise the next poll decides.
+  const settled = lastPoll.reachable && !lastPoll.scanning && lastPoll.sharedFiles !== null
+  if (!initialIndexPending || !settled || Date.now() - lastPoll.at >= 2 * config.timing.statusMs) return
   initialIndexPending = false
   if (lastPoll.sharedFiles === 0 && !unshared) noteLibraryChange()
+}
+
+// slskd sharing nothing while the library has music needs a rescan: when Seeker first sees it, or
+// when shares drop to nothing (after a restart that lost slskd's share cache, say). Not while they
+// stay at nothing, or it would ask on every poll.
+export function sharesLost(previous: number | null, current: number): boolean {
+  return current === 0 && (previous === null || previous > 0)
 }
 
 async function run() {
