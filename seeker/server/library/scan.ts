@@ -913,6 +913,18 @@ async function scanFolder(force: boolean, signal: AbortSignal): Promise<ScanResu
   return result('done', message, { files: files.length, updated, removed: gone.length })
 }
 
+// Tracks deleted from the library: their rows go and their albums are rebuilt without them, through
+// the commit queue, so a scan running meanwhile neither waits nor puts them back.
+export async function forgetTracks(paths: string[]): Promise<void> {
+  indexedElsewhere(paths)
+  await serializeIndex(async () => {
+    const albumIds = albumsOf([], paths)
+    if (albumIds.size) await commitIndex([], paths, { albumIds })
+  })
+  noteLibraryChange()
+  announce()
+}
+
 // Index specific files right after an import, without walking the whole library. A full scan
 // that's running doesn't hold this up: it only waits for that scan's commit, if it's underway.
 export async function scanFiles(files: string[]): Promise<void> {

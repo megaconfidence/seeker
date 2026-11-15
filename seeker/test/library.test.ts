@@ -260,3 +260,21 @@ test('post-import indexing also rolls back track writes if album insertion fails
   assert.equal((await scanLibrary()).outcome, 'done')
   assert.ok(get('SELECT path FROM lib_tracks WHERE path = ?', [added]))
 })
+
+test('deleting a track drops it from the index straight away, even when a running scan is then stopped', async () => {
+  const { deleteLibraryTrack } = await import('../server/library/manage.ts')
+  const { cancelLibraryScan } = await import('../server/library/scan.ts')
+  const file = path.join(albumDir(3), '05 - Track 5.mp3')
+  const track = get<{ id: number; album_id: string }>('SELECT id, album_id FROM lib_tracks WHERE path = ?', [file])!
+  const tracksOnAlbum = () => get<{ track_count: number }>('SELECT track_count FROM lib_albums WHERE id = ?', [track.album_id])?.track_count
+  const before = tracksOnAlbum()!
+  const scan = scanLibrary()
+  assert.equal(libraryStatus().scanning, true)
+  await deleteLibraryTrack(track.id)
+  // Stopping the scan drops a scan queued after it, which deleting a track used to rely on.
+  await cancelLibraryScan()
+  await scan
+  assert.equal(await exists(file), false)
+  assert.equal(get('SELECT 1 AS found FROM lib_tracks WHERE path = ?', [file]), undefined)
+  assert.equal(tracksOnAlbum(), before - 1)
+})
