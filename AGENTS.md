@@ -166,6 +166,8 @@ reporting the last commit that built an image.
   `processJob()` refuses to file while `musicFolderProblem()` reports one.
 - Music-folder failures keep jobs in `processing` with downloaded rows intact. `next_retry_at` persists the ten-minute
   processing retry; `retryJob()` resumes those files directly. Never settle or clean up a job waiting for music.
+- Library scans prepare album metadata before changing SQLite. Track upserts, removals and album rows commit in one
+  synchronous transaction; never hold a SQLite transaction across asynchronous filesystem work.
 - Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,
   `tagForLibrary()` in `jobs/process.ts` tags a copy if it can remove the original, and otherwise fails the file.
 

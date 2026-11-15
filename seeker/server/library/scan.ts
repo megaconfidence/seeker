@@ -25,6 +25,14 @@ let scanning = false
 let pending: { force: boolean } | null = null
 let problem: LibraryProblem | null = null
 let retryTimer: ReturnType<typeof setTimeout> | undefined
+let indexWork = Promise.resolve()
+
+// Full scans and post-import indexing must not prepare album snapshots over one another.
+function serializeIndex<T>(run: () => Promise<T>): Promise<T> {
+  const next = indexWork.then(run)
+  indexWork = next.then(() => {}, () => {})
+  return next
+}
 
 export function libraryCounts() {
   const albums = get<{ n: number }>('SELECT COUNT(*) AS n FROM lib_albums')?.n ?? 0
@@ -221,30 +229,10 @@ function commonDir(paths: string[]): string {
   return prefix
 }
 
-async function rebuildAlbums(albumIds?: Set<string>) {
-  const where = albumIds ? `WHERE album_id IN (${[...albumIds].map(() => '?').join(',')})` : ''
-  const params = albumIds ? [...albumIds] : []
-  const rows = all<{
-    id: number
-    path: string
-    album_id: string
-    title: string
-    album: string
-    album_artist: string
-    year: number | null
-    duration: number | null
-    codec: string | null
-    lossless: number
-    bit_depth: number | null
-    sample_rate: number | null
-    bitrate: number | null
-    mb_album_id: string | null
-    added_at: number
-  }>(
-    `SELECT id, path, album_id, title, album, album_artist, year, duration, codec, lossless, bit_depth, sample_rate,
-       bitrate, mb_album_id, added_at FROM lib_tracks ${where}`,
-    params,
-  )
+type AlbumTrack = TrackRow & { added_at: number }
+type AlbumRow = Record<string, string | number | null>
+
+async function prepareAlbums(rows: AlbumTrack[]): Promise<AlbumRow[]> {
   const groups = new Map<string, typeof rows>()
   for (const row of rows) {
     const list = groups.get(row.album_id) ?? []
@@ -259,7 +247,7 @@ async function rebuildAlbums(albumIds?: Set<string>) {
     imported.set(row.path, row.deezer_album_id!)
   }
 
-  const albums: Record<string, unknown>[] = []
+  const albums: AlbumRow[] = []
   for (const [id, tracks] of groups) {
     const firstTrack = tracks[0]!
     const dir = commonDir(tracks.map((track) => track.path))
@@ -288,22 +276,42 @@ async function rebuildAlbums(albumIds?: Set<string>) {
     })
   }
 
+  return albums
+}
+
+function writeAlbums(albums: AlbumRow[], albumIds?: Set<string>) {
+  if (albumIds) {
+    for (const id of albumIds) exec('DELETE FROM lib_albums WHERE id = ?', [id])
+  } else {
+    exec('DELETE FROM lib_albums')
+  }
+  for (const album of albums) {
+    exec(
+      `INSERT INTO lib_albums (id, title, artist, year, dir, cover, track_count, duration, format, norm_key, mb_album_id,
+         deezer_album_id, added_at)
+       VALUES (:id, :title, :artist, :year, :dir, :cover, :track_count, :duration, :format, :norm_key, :mb_album_id,
+         :deezer_album_id, :added_at)`,
+      album,
+    )
+  }
+}
+
+async function commitIndex(updates: TrackRow[], gone: string[], albumIds?: Set<string>, markIndexed = false) {
+  const where = albumIds ? `WHERE album_id IN (${[...albumIds].map(() => '?').join(',')})` : ''
+  const current = all<AlbumTrack>(`SELECT * FROM lib_tracks ${where}`, albumIds ? [...albumIds] : [])
+  const projected = new Map(current.map((row) => [row.path, row]))
+  for (const file of gone) projected.delete(file)
+  const now = Date.now()
+  for (const row of updates) projected.set(row.path, { ...row, added_at: projected.get(row.path)?.added_at ?? now })
+  // All asynchronous cover discovery finishes before the synchronous transaction starts.
+  const albums = await prepareAlbums([...projected.values()])
   transaction(() => {
-    if (albumIds) {
-      for (const id of albumIds) exec('DELETE FROM lib_albums WHERE id = ?', [id])
-    } else {
-      exec('DELETE FROM lib_albums')
-    }
-    for (const album of albums) {
-      exec(
-        `INSERT INTO lib_albums (id, title, artist, year, dir, cover, track_count, duration, format, norm_key, mb_album_id,
-           deezer_album_id, added_at)
-         VALUES (:id, :title, :artist, :year, :dir, :cover, :track_count, :duration, :format, :norm_key, :mb_album_id,
-           :deezer_album_id, :added_at)`,
-        album as Record<string, string | number | null>,
-      )
-    }
+    for (const row of updates) upsertTrack(row, now)
+    for (const file of gone) exec('DELETE FROM lib_tracks WHERE path = ?', [file])
+    writeAlbums(albums, albumIds)
+    if (markIndexed) setMeta('library_indexed', '1')
   })
+  rebuildOwnedIndex()
 }
 
 const result = (outcome: ScanResult['outcome'], message: string, counts: Partial<ScanResult> = {}): ScanResult => ({
@@ -325,10 +333,10 @@ export async function scanLibrary(options: { force?: boolean } = {}): Promise<Sc
   scanning = true
   announce()
   try {
-    return await scan(!!options.force)
+    return await serializeIndex(() => scan(!!options.force))
   } catch (error) {
     log.error('Library scan failed', error)
-    return result('refused', `The library scan failed: ${errorMessage(error)}`)
+    return refuse(`The library scan failed: ${errorMessage(error)}.`, 0, false, false)
   } finally {
     scanning = false
     announce()
@@ -392,24 +400,18 @@ async function scan(force: boolean): Promise<ScanResult> {
     )
   }
 
-  let updated = 0
-  const now = Date.now()
+  const updates: TrackRow[] = []
   for (const entry of files) {
     const existing = known.get(entry.file)
     if (existing && existing.mtime === entry.mtime && existing.size === entry.size) continue
     try {
-      upsertTrack(await readTrack(entry.file, entry.mtime, entry.size), now)
-      updated++
+      updates.push(await readTrack(entry.file, entry.mtime, entry.size))
     } catch (error) {
       log.warn(`Could not read ${entry.file}`, error)
     }
   }
-  transaction(() => {
-    for (const file of gone) exec('DELETE FROM lib_tracks WHERE path = ?', [file])
-  })
-  await rebuildAlbums()
-  rebuildOwnedIndex()
-  setMeta('library_indexed', '1')
+  await commitIndex(updates, gone, undefined, true)
+  const updated = updates.length
   if (updated || gone.length) {
     if (firstScan) noteInitialLibrary()
     else noteLibraryChange()
@@ -427,24 +429,36 @@ async function scan(force: boolean): Promise<ScanResult> {
 
 // Index specific files right after an import, without walking the whole library.
 export async function scanFiles(files: string[]): Promise<void> {
+  return serializeIndex(async () => {
+    try {
+      await indexFiles(files)
+    } catch (error) {
+      refuse(`Indexing imported files failed: ${errorMessage(error)}.`, 0, false, false)
+      throw error
+    } finally {
+      announce()
+    }
+  })
+}
+
+async function indexFiles(files: string[]): Promise<void> {
   const albumIds = new Set<string>()
-  const now = Date.now()
+  const updates: TrackRow[] = []
   for (const file of files) {
     const previous = get<{ album_id: string }>('SELECT album_id FROM lib_tracks WHERE path = ?', [file])
     if (previous) albumIds.add(previous.album_id)
     try {
       const stat = await fs.stat(file)
       const row = await readTrack(file, Math.floor(stat.mtimeMs), stat.size)
-      upsertTrack(row, now)
+      updates.push(row)
       albumIds.add(row.album_id)
     } catch (error) {
       log.warn(`Could not index ${file}`, error)
     }
   }
-  if (albumIds.size) await rebuildAlbums(albumIds)
-  rebuildOwnedIndex()
-  noteLibraryChange()
-  announce()
+  if (albumIds.size) await commitIndex(updates, [], albumIds)
+  if (problem?.message.startsWith('Indexing imported files failed:')) problem = null
+  if (updates.length) noteLibraryChange()
 }
 
 export function startLibraryScanner() {

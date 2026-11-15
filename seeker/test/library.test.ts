@@ -38,8 +38,8 @@ Object.assign(process.env, {
 })
 
 const { updateSettings } = await import('../server/settings.ts')
-const { scanLibrary, libraryStatus, musicFolderProblem } = await import('../server/library/scan.ts')
-const { get } = await import('../server/db.ts')
+const { scanLibrary, scanFiles, libraryStatus, musicFolderProblem } = await import('../server/library/scan.ts')
+const { all, db, get } = await import('../server/db.ts')
 const { recentProblems } = await import('../server/log.ts')
 updateSettings({ shares: { autoRescan: false } })
 
@@ -213,4 +213,50 @@ test('most of the library going missing is refused until forced, and comes back 
   assert.equal(restored.outcome, 'done', restored.message)
   assert.equal(restored.updated, 125)
   assert.equal(indexed(), 175)
+})
+
+const snapshot = () => ({
+  tracks: all('SELECT * FROM lib_tracks ORDER BY id'),
+  albums: all('SELECT * FROM lib_albums ORDER BY id'),
+})
+
+test('a failed album rebuild rolls back updates, removals and new tracks together', async () => {
+  const before = snapshot()
+  const removed = path.join(albumDir(8), '03 - Track 3.mp3')
+  const changed = path.join(albumDir(8), '04 - Track 4.mp3')
+  const added = path.join(albumDir(8), 'New Track.mp3')
+  await fs.rename(removed, path.join(dirs.parked, 'removed.mp3'))
+  await fs.utimes(changed, new Date(), new Date(Date.now() + 10_000))
+  await fs.copyFile(fixture, added)
+  db.exec("CREATE TEMP TRIGGER reject_album BEFORE INSERT ON lib_albums BEGIN SELECT RAISE(ABORT, 'injected album failure'); END")
+  try {
+    const scan = await scanLibrary()
+    assert.equal(scan.outcome, 'refused')
+    assert.match(libraryStatus().problem?.message ?? '', /injected album failure/)
+    assert.equal(libraryStatus().problem?.canForce, false)
+    assert.deepEqual(snapshot(), before)
+  } finally {
+    db.exec('DROP TRIGGER reject_album')
+  }
+  const scan = await scanLibrary()
+  assert.equal(scan.outcome, 'done')
+  assert.equal(scan.removed, 1)
+  assert.equal(scan.updated, 2)
+  assert.equal(libraryStatus().problem, null)
+})
+
+test('post-import indexing also rolls back track writes if album insertion fails', async () => {
+  const before = snapshot()
+  const added = path.join(albumDir(8), 'Another New Track.mp3')
+  await fs.copyFile(fixture, added)
+  db.exec("CREATE TEMP TRIGGER reject_album BEFORE INSERT ON lib_albums BEGIN SELECT RAISE(ABORT, 'injected album failure'); END")
+  try {
+    await assert.rejects(scanFiles([added]), /injected album failure/)
+    assert.deepEqual(snapshot(), before)
+    assert.match(libraryStatus().problem?.message ?? '', /Indexing imported files failed/)
+  } finally {
+    db.exec('DROP TRIGGER reject_album')
+  }
+  assert.equal((await scanLibrary()).outcome, 'done')
+  assert.ok(get('SELECT path FROM lib_tracks WHERE path = ?', [added]))
 })
