@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import fs from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
-import { parseFromTokenizer } from 'music-metadata'
+import { parseFromTokenizer, TrackType } from 'music-metadata'
 import type { IAudioMetadata, IOptions } from 'music-metadata'
 import { AbstractTokenizer, EndOfStreamError, NotRegularFileError } from 'strtok3'
 import type { IRandomAccessFileInfo, IReadChunkOptions } from 'strtok3'
@@ -190,7 +190,8 @@ function parse(file: string, splice: Splice, randomAccess: boolean, options: IOp
 }
 
 // Tags and stream details, read the way parseFile(file, { skipCovers: true, duration: false })
-// reads them, but without reading cover art in MP3s, and in fewer, bigger reads.
+// reads them, but without reading cover art in MP3s, in fewer, bigger reads, and with Ogg
+// durations, which that leaves out.
 export async function readTags(file: string, options: TagReadOptions = {}): Promise<IAudioMetadata> {
   options.signal?.throwIfAborted()
   const handle = await fs.open(file, constants.O_RDONLY | constants.O_NONBLOCK)
@@ -198,9 +199,10 @@ export async function readTags(file: string, options: TagReadOptions = {}): Prom
     const stat = await handle.stat()
     if (!stat.isFile()) throw new NotRegularFileError(file)
     const source = new FileSource(handle, stat.size, options)
-    const meta = MPEG_EXTENSIONS.has(path.extname(file).toLowerCase())
+    let meta = MPEG_EXTENSIONS.has(path.extname(file).toLowerCase())
       ? await readMpeg(file, source)
       : await parse(file, new Splice(source), true)
+    if (meta.format.container === 'Ogg' && meta.format.duration === undefined) meta = await withOggDuration(meta, source)
     // A parser may have caught the abort and carried on.
     options.signal?.throwIfAborted()
     return meta
@@ -388,4 +390,69 @@ function putSynchsafe(bytes: Uint8Array, at: number, value: number) {
   bytes[at + 1] = (value >>> 14) & 0x7f
   bytes[at + 2] = (value >>> 7) & 0x7f
   bytes[at + 3] = value & 0x7f
+}
+
+const OGG_PAGE = 0x4f676753 // "OggS"
+// The last page is usually a few kB, and never more than 65,307 bytes.
+const OGG_TAILS = [16 * 1024, 72 * 1024]
+
+// With duration: false, music-metadata stops reading an Ogg file after its first pages, so it never
+// sees the last one, whose granule position is the stream's length in samples. Only the end of the
+// file is read for it.
+async function withOggDuration(meta: IAudioMetadata, source: FileSource): Promise<IAudioMetadata> {
+  const { format } = meta
+  const serial = format.trackInfo.find((track) => track.type === TrackType.audio)?.id
+  if (serial === undefined || !format.sampleRate) return meta
+  let granule: number | null = null
+  for (const size of OGG_TAILS) {
+    const start = Math.max(0, source.size - size)
+    granule = lastGranule(await source.bytes(start, size), start, source.size, serial)
+    if (granule !== null || start === 0) break
+  }
+  if (granule === null) return meta
+  let samples = granule
+  let rate = format.sampleRate
+  if (format.codec === 'Opus') {
+    // Opus always counts at 48 kHz, from before the encoder's pre-skip.
+    const preSkip = opusPreSkip(await source.bytes(0, HEAD), serial)
+    if (preSkip === null) return meta
+    samples -= preSkip
+    rate = 48_000
+  }
+  return samples > 0 ? { ...meta, format: { ...format, duration: samples / rate } } : meta
+}
+
+// The granule position of the stream's last complete page in `bytes`, which start at `offset`.
+function lastGranule(bytes: Uint8Array, offset: number, fileSize: number, serial: number): number | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  for (let at = bytes.length - 27; at >= 0; at--) {
+    if (view.getUint32(at) !== OGG_PAGE || bytes[at + 4] !== 0) continue
+    const segments = bytes[at + 26]!
+    if (at + 27 + segments > bytes.length) continue
+    let size = 27 + segments
+    for (let i = 0; i < segments; i++) size += bytes[at + 27 + i]!
+    if (offset + at + size > fileSize || view.getUint32(at + 14, true) !== serial) continue
+    const granule = view.getBigUint64(at + 6, true)
+    // All ones: no packet ends on this page.
+    if (granule !== 0xffffffffffffffffn) return Number(granule)
+  }
+  return null
+}
+
+// From the Opus ID header, on the stream's first page. First pages of all streams lead the file.
+function opusPreSkip(bytes: Uint8Array, serial: number): number | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  let at = 0
+  while (at + 27 <= bytes.length && view.getUint32(at) === OGG_PAGE) {
+    const segments = bytes[at + 26]!
+    const body = at + 27 + segments
+    if (body > bytes.length) return null
+    let size = 0
+    for (let i = 0; i < segments; i++) size += bytes[at + 27 + i]!
+    if (view.getUint32(at + 14, true) === serial) {
+      return size >= 19 && body + 19 <= bytes.length && latin1(bytes, body, 8) === 'OpusHead' ? view.getUint16(body + 10, true) : null
+    }
+    at = body + size
+  }
+  return null
 }

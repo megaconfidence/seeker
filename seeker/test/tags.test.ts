@@ -1,5 +1,5 @@
 // Reading tags for the library: the same results as music-metadata's own parse, MP3s without
-// reading their cover art, every read counted, and aborts.
+// reading their cover art, every read counted, aborts, and Ogg durations.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
@@ -333,6 +333,23 @@ test('v2.4 tags with plain frame sizes, as old iTunes wrote them, are read whole
   assert.equal(meta.common.artist, 'iTunes Artist')
   assert.equal(meta.common.album, 'iTunes Album')
   assert.ok(bytes < BUDGET, `read ${bytes} bytes`)
+})
+
+test('Ogg Vorbis and Opus files get their duration from the last page', async () => {
+  // Long enough for music-metadata to stop reading before the end (after 13 pages).
+  await Promise.all([
+    ff('-f', 'lavfi', '-i', 'anoisesrc=d=40:seed=4', '-ac', '2', '-c:a', 'vorbis', '-strict', '-2', '-metadata', 'title=Vorbis', at('long.ogg')),
+    ff('-f', 'lavfi', '-i', 'anoisesrc=d=60:seed=5', '-c:a', 'libopus', '-b:a', '48k', '-metadata', 'title=Opus', at('long.opus')),
+  ])
+  for (const file of [at('long.ogg'), at('long.opus')]) {
+    const before = await oldRead(file)
+    assert.equal(before.format.duration, undefined, 'music-metadata stops before the last page')
+    const full = await parseFile(file, { skipCovers: true, duration: true })
+    const { meta, bytes } = await measure(file)
+    assert.equal(meta.format.duration, full.format.duration)
+    assert.deepEqual({ ...fields(meta), duration: undefined }, fields(before))
+    assert.ok(bytes < (await fs.stat(file)).size / 2, `read ${bytes} bytes`)
+  }
 })
 
 test('other formats read as music-metadata reads them', async () => {
