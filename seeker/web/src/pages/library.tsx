@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { FolderInput, Library as LibraryIcon, Play, RefreshCw, Search, TriangleAlert, X } from 'lucide-react'
+import { FolderInput, Library as LibraryIcon, Play, RefreshCw, Search, Square, TriangleAlert, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import type { LibraryAlbum, LibraryArtist, LibraryTrack, ScanProgress } from '../../../shared/types.ts'
+import type { LibraryAlbum, LibraryArtist, LibraryTrack, ScanProgress, ScanResult } from '../../../shared/types.ts'
 import { Cover } from '../components/cover.tsx'
 import { AlbumGridSkeleton, Skeleton } from '../components/skeleton.tsx'
 import { Button, Empty, PageHeader, Select, Tabs } from '../components/ui.tsx'
@@ -11,6 +11,7 @@ import { useConfirm } from '../lib/confirm.tsx'
 import { plural } from '../lib/format.ts'
 import { useStatus } from '../lib/live.ts'
 import { coverUrl, fromLibrary, usePlayer } from '../lib/player.tsx'
+import { useToast } from '../lib/toast.tsx'
 
 type Sort = 'recent' | 'artist' | 'title' | 'year'
 
@@ -70,6 +71,14 @@ export function LibraryPage() {
     enabled: tab === 'artists',
   })
   const rescan = useMutation({ mutationFn: (force: boolean) => api.post('/library/scan', { force }) })
+  const toast = useToast()
+  const stop = useMutation({
+    mutationFn: () => api.post<{ scan: ScanResult | null }>('/library/scan/cancel'),
+    onSuccess: ({ scan }) => {
+      if (scan?.outcome === 'cancelled') toast(scan.message)
+    },
+    onError: (error) => toast(error.message, 'error'),
+  })
   const confirm = useConfirm()
   const problem = status?.library.problem ?? null
 
@@ -127,6 +136,18 @@ export function LibraryPage() {
             <Button size="sm" variant="ghost" icon={<RefreshCw className={scanning ? 'size-3.5 animate-spin' : 'size-3.5'} />} disabled={scanning} onClick={() => rescan.mutate(false)}>
               {scanning ? 'Scanning' : 'Rescan'}
             </Button>
+            {status?.library.scanning && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Square className="size-3" fill="currentColor" />}
+                loading={stop.isPending}
+                disabled={total?.progress?.phase === 'committing'}
+                onClick={() => stop.mutate()}
+              >
+                {stop.isPending ? 'Stopping' : 'Stop'}
+              </Button>
+            )}
             <Link to="/import">
               <Button size="sm" icon={<FolderInput className="size-3.5" />}>
                 Import music

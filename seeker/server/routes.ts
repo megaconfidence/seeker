@@ -46,7 +46,7 @@ import {
 import { getJob, listJobs, toDetail } from './jobs/store.ts'
 import { identifyImportFolder, identifyLibraryAlbum, importFolder, listImportFolders, rematchLibraryAlbum } from './library/importer.ts'
 import { deleteLibraryAlbum, deleteLibraryTrack, upgradeLibraryAlbum } from './library/manage.ts'
-import { scanLibrary } from './library/scan.ts'
+import { cancelLibraryScan, scanLibrary } from './library/scan.ts'
 import { albumCover, getAlbum, listAlbums, listArtists, searchTracks, streamTrack } from './library/serve.ts'
 import { deezer } from './metadata/deezer.ts'
 import { getSettings, updateSettings } from './settings.ts'
@@ -287,6 +287,7 @@ export function apiRoutes() {
     void scanLibrary({ force: body.force === true })
     return c.json({ ok: true })
   })
+  api.post('/library/scan/cancel', async (c) => c.json({ ok: true, scan: await cancelLibraryScan() }))
   api.delete('/library/albums/:id', async (c) => c.json({ deleted: await deleteLibraryAlbum(c.req.param('id')) }))
   api.delete('/library/tracks/:id', async (c) => {
     await deleteLibraryTrack(idParam(c))

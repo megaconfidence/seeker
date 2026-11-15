@@ -73,6 +73,7 @@ test('every web-app feature has an MCP tool', async () => {
   const names = tools.map((tool) => tool.name).sort()
   assert.deepEqual(names, [
     'cancel_download',
+    'cancel_library_scan',
     'check_new_releases',
     'clear_finished_downloads',
     'create_token',
@@ -123,6 +124,9 @@ test('every web-app feature has an MCP tool', async () => {
     assert.match(tools.find((tool) => tool.name === name)?.description ?? '', /[Pp]ermanently/)
     assert.match(tools.find((tool) => tool.name === name)?.description ?? '', /recycle bin/)
   }
+  // Stopping a scan keeps what it read and removes nothing, so it isn't destructive.
+  const cancel = tools.find((tool) => tool.name === 'cancel_library_scan')?.annotations
+  assert.deepEqual([cancel?.destructiveHint, cancel?.idempotentHint, cancel?.readOnlyHint ?? false], [false, true, false])
 })
 
 test('status, library and import folders', async () => {
@@ -176,6 +180,32 @@ test('rescan_library says what the scan did, and whether it left the library alo
   assert.equal(result.data.scan.outcome, 'done')
   assert.equal(result.data.problem, null)
   assert.equal((await call('get_status')).data.library.problem, null)
+})
+
+test('cancel_library_scan stops a running scan, and says so when none is running', async (t) => {
+  const idle = await call('cancel_library_scan')
+  assert.equal(idle.isError, false, idle.text)
+  assert.match(idle.text, /^No library scan is running\./)
+  assert.deepEqual([idle.data.scan, idle.data.scanning], [null, false])
+
+  // A scan held up looking at the music folder, as on a share that stopped answering, stops at once.
+  const realStat = fs.stat.bind(fs)
+  let answer!: () => void
+  const unanswered = new Promise<void>((resolve) => (answer = resolve))
+  t.mock.method(fs, 'stat', (async (...args: Parameters<typeof fs.stat>) => {
+    if (args[0] === dirs.music) await unanswered
+    return realStat(...args)
+  }) as typeof fs.stat)
+  const { scanLibrary } = await import('../server/library/scan.ts')
+  const running = scanLibrary()
+  const stopped = await call('cancel_library_scan')
+  answer()
+  assert.equal(stopped.isError, false, stopped.text)
+  assert.equal(stopped.data.scan.outcome, 'cancelled')
+  assert.match(stopped.text, /^Library scan stopped\. Seeker keeps what it read and continues from there next time\./)
+  assert.equal(stopped.data.scanning, false)
+  assert.equal((await running).outcome, 'cancelled')
+  assert.equal((await call('rescan_library')).data.scan.outcome, 'done', 'the next scan runs normally')
 })
 
 test('rescan_shares asks slskd to rescan right away', async () => {

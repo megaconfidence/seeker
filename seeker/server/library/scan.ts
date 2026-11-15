@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { setMaxListeners } from 'node:events'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { Dirent } from 'node:fs'
@@ -61,8 +62,11 @@ const RETRY_MS = 10 * 60_000
 // How often a running scan reports its progress: to the web app, and to the log on long scans.
 const PROGRESS_EVENT_MS = 500
 const PROGRESS_LOG_MS = 15_000
+const STOPPED_MESSAGE = 'Library scan stopped. Seeker keeps what it read and continues from there next time.'
 
-let scanning = false
+// The running scan: what stops it, and its result.
+let stopScan: AbortController | null = null
+let scanDone: Promise<ScanResult> | null = null
 let pending: { force: boolean } | null = null
 let problem: LibraryProblem | null = null
 let retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -97,7 +101,7 @@ export function libraryCounts() {
 }
 
 export function libraryStatus(): LibraryStatus {
-  return { ...libraryCounts(), scanning, problem, progress: progress && { ...progress } }
+  return { ...libraryCounts(), scanning: stopScan !== null, problem, progress: progress && { ...progress } }
 }
 
 const count = (n: number) => n.toLocaleString('en')
@@ -189,16 +193,41 @@ const byPath = (a: { file: string } | { path: string }, b: { file: string } | { 
   return left < right ? -1 : left > right ? 1 : 0
 }
 
+const STOPPED = Symbol('stopped')
+
+// Settles with `promise`, or with STOPPED as soon as the scan is stopped: a call stuck on an
+// unresponsive network share can't be interrupted, so the scan stops waiting for it instead.
+function unlessStopped<T>(promise: Promise<T>, signal: AbortSignal): Promise<T | typeof STOPPED> {
+  return new Promise((resolve, reject) => {
+    const stop = () => resolve(STOPPED)
+    if (signal.aborted) stop()
+    else signal.addEventListener('abort', stop, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', stop)
+        resolve(value)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', stop)
+        reject(error)
+      },
+    )
+  })
+}
+
 // Lists the music folder, several folders and files at a time: on a network share each listing
 // and stat is a round trip. Folders that can't be read are collected rather than skipped, so their
-// tracks aren't taken as deleted. Only failing to read the music folder itself is an error.
-async function list(root: string, onFolder: (dir: string) => void, onFile: () => void): Promise<Listing> {
+// tracks aren't taken as deleted. Only failing to read the music folder itself is an error. A
+// stopped scan gets a partial listing back, which says nothing about what's gone.
+async function list(root: string, signal: AbortSignal, onFolder: (dir: string) => void, onFile: () => void): Promise<Listing> {
   const listing: Listing = { files: [], unreadable: [], unreadableFiles: new Set(), covers: new Map() }
   type Task = { dir: string } | { file: string }
   await eachLimit<Task>([{ dir: root }], LIST_CONCURRENCY, async (task, add) => {
+    if (signal.aborted) return
     if ('file' in task) {
       try {
-        const stat = await fs.stat(task.file)
+        const stat = await unlessStopped(fs.stat(task.file), signal)
+        if (stat === STOPPED) return
         listing.files.push({ file: task.file, mtime: Math.floor(stat.mtimeMs), size: stat.size })
         onFile()
       } catch (error) {
@@ -207,15 +236,16 @@ async function list(root: string, onFolder: (dir: string) => void, onFile: () =>
       return
     }
     onFolder(task.dir)
-    let entries: Dirent[]
+    let entries: Dirent[] | typeof STOPPED
     try {
-      entries = await fs.readdir(task.dir, { withFileTypes: true })
+      entries = await unlessStopped(fs.readdir(task.dir, { withFileTypes: true }), signal)
     } catch (error) {
       if (task.dir === root) throw error
       // A folder that vanished during the scan is simply gone; anything else may come back.
       if (errno(error) !== 'ENOENT') listing.unreadable.push(task.dir)
       return
     }
+    if (entries === STOPPED) return
     const images: string[] = []
     for (const entry of entries) {
       if (entry.name.startsWith('.')) continue
@@ -285,6 +315,30 @@ async function readTrack(file: string, mtime: number, size: number, io: TagReadO
 }
 
 type TrackRow = Awaited<ReturnType<typeof readTrack>>
+
+// Reads a file's tags, or gives up when `stop` aborts. A read on an unresponsive network share
+// can't be interrupted, so a stopped scan doesn't wait for it. Read errors are thrown.
+async function readWithin(
+  entry: Entry,
+  options: { stop?: AbortSignal; onBytes?: (bytes: number) => void } = {},
+): Promise<TrackRow | typeof STOPPED> {
+  const { stop, onBytes } = options
+  if (stop?.aborted) return STOPPED
+  const read = new AbortController()
+  const onStop = () => read.abort(new DOMException('The library scan was stopped', 'AbortError'))
+  stop?.addEventListener('abort', onStop, { once: true })
+  try {
+    return await Promise.race([
+      readTrack(entry.file, entry.mtime, entry.size, { signal: read.signal, onBytes }),
+      new Promise<never>((_, reject) => read.signal.addEventListener('abort', () => reject(read.signal.reason), { once: true })),
+    ])
+  } catch (error) {
+    if (read.signal.aborted) return STOPPED
+    throw error
+  } finally {
+    stop?.removeEventListener('abort', onStop)
+  }
+}
 
 // What a statfs type says about a folder: the network filesystem it's on, or null. The types are
 // 32-bit magic numbers, which some platforms report as negative.
@@ -499,25 +553,55 @@ const result = (outcome: ScanResult['outcome'], message: string, counts: Partial
 // `force` removes tracks whose files are gone even when that's most of the library, once the user
 // has confirmed they removed them. A missing or unreadable music folder is never scanned.
 export async function scanLibrary(options: { force?: boolean } = {}): Promise<ScanResult> {
-  if (scanning) {
+  if (stopScan) {
     pending = { force: !!options.force || !!pending?.force }
     return result('queued', 'A library scan is already running; Seeker scans again when it finishes.')
   }
-  scanning = true
+  stopScan = new AbortController()
+  // One listener per listing or read in progress, more than the default warning allows.
+  setMaxListeners(0, stopScan.signal)
+  scanDone = runScan(!!options.force, stopScan.signal)
+  return scanDone
+}
+
+async function runScan(force: boolean, signal: AbortSignal): Promise<ScanResult> {
   announce()
   try {
-    return await scan(!!options.force)
+    return await scan(force, signal)
   } catch (error) {
     log.error('Library scan failed', error)
     return refuse(`The library scan failed: ${errorMessage(error)}.`, 0, false, false)
   } finally {
-    scanning = false
+    stopScan = null
+    scanDone = null
     announce()
     if (pending) {
       const next = pending
       pending = null
       void scanLibrary(next)
     }
+  }
+}
+
+// Stops the running scan: no more reads start, reads still going are abandoned, and what was read
+// is saved, but nothing is removed. A scan queued to follow it is dropped. Waits up to `waitMs` for
+// the scan to end, and returns its result; null when no scan was running.
+export async function cancelLibraryScan(waitMs = 10_000): Promise<ScanResult | null> {
+  pending = null
+  const done = scanDone
+  if (!stopScan || !done) return null
+  if (!stopScan.signal.aborted) {
+    log.info('Stopping the library scan')
+    stopScan.abort()
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const slow = new Promise<ScanResult>((resolve) => {
+    timer = setTimeout(() => resolve(result('cancelled', 'Seeker is stopping the library scan. It saves what it read first.')), waitMs)
+  })
+  try {
+    return await Promise.race([done, slow])
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -535,7 +619,7 @@ function refuse(message: string, missing: number, canForce: boolean, retry: bool
   return result('refused', full)
 }
 
-async function scan(force: boolean): Promise<ScanResult> {
+async function scan(force: boolean, signal: AbortSignal): Promise<ScanResult> {
   progress = { phase: 'listing', found: 0, read: 0, toRead: 0, current: null }
   bytesRead = 0
   changedDuringScan = new Set()
@@ -543,12 +627,22 @@ async function scan(force: boolean): Promise<ScanResult> {
   progressLog.unref()
   reportProgress(true)
   try {
-    return await scanFolder(force)
+    return await scanFolder(force, signal)
   } finally {
     clearInterval(progressLog)
     progress = null
     changedDuringScan = null
   }
+}
+
+// `reading` is how far the scan got, once it was reading files.
+function stopped(reading?: { read: number; toRead: number; files: number; updated: number }): ScanResult {
+  log.info(
+    reading
+      ? `Library scan stopped after reading ${count(reading.read)} of ${count(reading.toRead)} new or changed files; the next scan continues from there`
+      : 'Library scan stopped while listing the music folder',
+  )
+  return result('cancelled', STOPPED_MESSAGE, reading && { files: reading.files, updated: reading.updated })
 }
 
 // Lets requests waiting on the server run between batches of synchronous database work.
@@ -610,7 +704,7 @@ function batches(covers: Map<string, string | null>, onSaved: () => void) {
   }
 }
 
-async function scanFolder(force: boolean): Promise<ScanResult> {
+async function scanFolder(force: boolean, signal: AbortSignal): Promise<ScanResult> {
   const started = Date.now()
   const dir = config.musicDir
   clearTimeout(retryTimer)
@@ -632,11 +726,15 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
   let listing: Listing
   try {
     // Never created here: creating it would hide a share that isn't mounted.
-    if (!(await fs.stat(dir)).isDirectory()) throw Object.assign(new Error(`${dir} isn’t a folder`), { code: 'ENOTDIR' })
-    listing = await list(dir, onFolder, onFile)
+    const stat = await unlessStopped(fs.stat(dir), signal)
+    if (stat === STOPPED) return stopped()
+    if (!stat.isDirectory()) throw Object.assign(new Error(`${dir} isn’t a folder`), { code: 'ENOTDIR' })
+    listing = await list(dir, signal, onFolder, onFile)
   } catch (error) {
     return refuse(`Seeker can’t read the music folder, ${dir} (${fsReason(error)}). ${unmountedHint}`, known.size, false, true)
   }
+  // A listing cut short says nothing about what's gone, so nothing past here runs.
+  if (signal.aborted) return stopped()
   const { files, unreadable, unreadableFiles, covers } = listing
   if (files.length === 0 && known.size > 0) {
     if (unreadable.length || unreadableFiles.size) {
@@ -677,12 +775,13 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
     bytesRead += bytes
   }
   const read = async (entry: Entry) => {
-    if (saved.failed()) return
+    if (signal.aborted || saved.failed()) return
     progress!.current = relative(entry.file)
-    const row = await readTrack(entry.file, entry.mtime, entry.size, { onBytes }).catch((error: unknown) => {
+    const row = await readWithin(entry, { stop: signal, onBytes }).catch((error: unknown) => {
       log.warn(`Could not read ${entry.file}`, error)
       return null
     })
+    if (row === STOPPED) return
     if (row) {
       saved.add(row)
       updated++
@@ -701,6 +800,14 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
 
   progress = { ...progress!, phase: 'committing', current: null }
   reportProgress(true)
+  if (signal.aborted) {
+    const reading = { read: progress.read, toRead: toRead.length, files: files.length, updated }
+    // What was read is kept; removals wait for a scan that finishes. A first scan tells the share
+    // rescans once it's done, as it finds music slskd shares already.
+    await saveBatch(rest, covers)
+    if (updated && !firstScan) noteLibraryChange()
+    return stopped(reading)
+  }
   await serializeIndex(() => {
     // An import or deletion that changed a path while this scan read files knows better.
     const current = (file: string) => !changedDuringScan!.has(file)
@@ -731,7 +838,8 @@ export async function scanFiles(files: string[]): Promise<void> {
   await eachLimit(files, await readConcurrency(false), async (file) => {
     try {
       const stat = await fs.stat(file)
-      updates.push(await readTrack(file, Math.floor(stat.mtimeMs), stat.size))
+      const row = await readWithin({ file, mtime: Math.floor(stat.mtimeMs), size: stat.size })
+      if (row !== STOPPED) updates.push(row)
     } catch (error) {
       log.warn(`Could not index ${file}`, error)
     }

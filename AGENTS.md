@@ -188,13 +188,16 @@ reporting the last commit that built an image.
   (`BATCH_SIZE`, 200 tracks, or `SEEKER_SCAN_BATCH_MS`, 15 s), each with only its albums (the ones its tracks are on
   now and were on before), through `serializeIndex()`, filtering `changedDuringScan` each time, with a `setImmediate`
   between batches. Removals, the full album rebuild and `library_indexed = '1'` stay in the final commit, after the
-  guards. A failed or interrupted scan keeps its batches, and rows carry mtime and size, so the next scan reads only
-  what's left. The owned index is rebuilt at most every 15 s during batches: it reads every track.
+  guards. A stopped, failed or interrupted scan keeps its batches, and rows carry mtime and size, so the next scan
+  reads only what's left. The owned index is rebuilt at most every 15 s during batches: it reads every track.
 - A first scan sets `library_indexed` to `'0'` before its first batch and `'1'` in its final commit, so one that was
-  cut off (by a restart, say) is still the first scan when it resumes; `noteInitialLibrary()` runs once, when it
-  finishes, even with nothing left to read (it found tracks at the start). Databases from before the flag have tracks
-  and no flag, and aren't first scans. Later scans call `noteLibraryChange()` when they finish, never per batch: a
+  stopped or restarted is still the first scan when it resumes; `noteInitialLibrary()` runs once, when it finishes,
+  even with nothing left to read (it found tracks at the start). Databases from before the flag have tracks and no
+  flag, and aren't first scans. Later scans call `noteLibraryChange()` when they finish or stop, never per batch: a
   share rescan during a long scan would double the load on the share.
+- `cancelLibraryScan()` (the Stop button, MCP `cancel_library_scan`) starts no more reads, abandons reads in progress
+  rather than waiting for them, since a read on a hard NFS mount can't be interrupted, saves what was read, skips
+  removals and drops a queued scan. Listings and stats race the stop signal too (`unlessStopped()`).
 - Scans are slow on network shares because of round trips, not bytes: a 5,000-track NFS library took hours one
   operation at a time. So listings and stats run 16 at a time (`eachLimit()`), and tag reads 12, or 4 when `statfs`
   says the music folder is on a network filesystem (a bind mount reports its source's type), unless
@@ -235,8 +238,9 @@ reporting the last commit that built an image.
   music folder, the mass-removal limit, `force`, and atomic index commits.
 - `test/scan.test.ts`: scan speed and its side effects: bytes read (counted through `FileHandle.read`), NAS folders,
   progress, one listing per folder, embedded covers checked on demand, and an import during a slowed-down full scan.
-- `test/scan-resume.test.ts`: batches saved while a slowed scan reads, a first scan cut off before its final commit,
-  and `SEEKER_SCAN_CONCURRENCY`. Reads are slowed per file by patching `FileHandle.read`, told apart by size.
+- `test/scan-resume.test.ts`: batches saved while a slowed scan reads, stopping a scan (a first scan too) and picking
+  it up again, and `SEEKER_SCAN_CONCURRENCY`. Reads are slowed or held per file by patching `FileHandle.read`, told
+  apart by size.
 - `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
   folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.

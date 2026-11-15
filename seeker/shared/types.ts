@@ -378,7 +378,8 @@ export interface LibraryProblem {
 }
 
 export interface ScanResult {
-  outcome: 'done' | 'refused' | 'queued'
+  // 'cancelled': stopped part way; what it read is kept, and the next scan continues from there.
+  outcome: 'done' | 'refused' | 'queued' | 'cancelled'
   message: string
   files: number
   updated: number

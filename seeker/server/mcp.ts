@@ -22,7 +22,7 @@ import {
 import { getJob, listJobs, toDetail } from './jobs/store.ts'
 import { identifyImportFolder, identifyLibraryAlbum, importFolder, listImportFolders, rematchLibraryAlbum } from './library/importer.ts'
 import { deleteLibraryAlbum, deleteLibraryTrack, upgradeLibraryAlbum } from './library/manage.ts'
-import { scanLibrary } from './library/scan.ts'
+import { cancelLibraryScan, scanLibrary } from './library/scan.ts'
 import { getAlbum, listAlbums, listArtists, searchTracks } from './library/serve.ts'
 import { recentProblems } from './log.ts'
 import { testAcoustidKey } from './post/verify.ts'
@@ -760,7 +760,7 @@ function buildServer(): McpServer {
     {
       title: 'Rescan the library',
       description:
-        'Re-read the music folder, e.g. after changing files outside Seeker, and wait for the scan to finish. If the folder is missing, unreadable or empty, or more than half the library seems gone, Seeker keeps the library as it is and says why: an unmounted network share looks like that. get_status shows that as library.problem, and how far a running scan has got as library.progress. Scans save what they read as they go.',
+        'Re-read the music folder, e.g. after changing files outside Seeker, and wait for the scan to finish. If the folder is missing, unreadable or empty, or more than half the library seems gone, Seeker keeps the library as it is and says why: an unmounted network share looks like that. get_status shows that as library.problem, and how far a running scan has got as library.progress. Scans save what they read as they go; cancel_library_scan stops one.',
       inputSchema: {
         force: z
           .boolean()
@@ -772,6 +772,22 @@ function buildServer(): McpServer {
       guard(async () => {
         const scan = await scanLibrary({ force })
         return ok({ ...appStatus().library, scan }, scan.message)
+      }),
+  )
+
+  server.registerTool(
+    'cancel_library_scan',
+    {
+      title: 'Stop the library scan',
+      description:
+        'Stop a running library scan. Seeker keeps what it has read, removes nothing, and the next scan (at startup, every 6 hours, or rescan_library) continues from there. A scan queued to run after it is dropped too. Does nothing when no scan is running.',
+      inputSchema: {},
+      annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () =>
+      guard(async () => {
+        const scan = await cancelLibraryScan()
+        return ok({ ...appStatus().library, scan }, scan?.message ?? 'No library scan is running.')
       }),
   )
 

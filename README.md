@@ -222,11 +222,11 @@ tracks; a forced rescan never treats those access failures as deletions.
 
 Scans read only new and changed files, several at a time, and only their tags: a 5,000-track library on a network
 share takes seconds to a few minutes the first time. The Library page shows how far a scan has got and the file it's
-on, and albums appear as the scan saves them, every 200 tracks or 15 seconds. If Seeker restarts during a scan, the
-next one continues where it left off. Folders NAS systems keep next to your music (`@eaDir`, `#recycle`, `#snapshot`
-and the like) are skipped. Cover art embedded in the files isn't read during a scan; Seeker looks for it the first time
-an album without a cover image in its folder is shown. Music that finishes downloading during a scan is added straight
-away.
+on, and albums appear as the scan saves them, every 200 tracks or 15 seconds. **Stop** ends a scan early: Seeker keeps
+what it read, and the next scan (at startup, every 6 hours, or when you press **Rescan**) continues from there, as it
+does after a restart. Folders NAS systems keep next to your music (`@eaDir`, `#recycle`, `#snapshot` and the like) are
+skipped. Cover art embedded in the files isn't read during a scan; Seeker looks for it the first time an album without
+a cover image in its folder is shown. Music that finishes downloading during a scan is added straight away.
 
 On a network share (NFS, SMB, or a FUSE mount such as sshfs or rclone), Seeker reads 4 files at a time instead of 12,
 so a scan doesn't crowd out everything else using the share; `SEEKER_SCAN_CONCURRENCY` sets the number yourself.
@@ -265,7 +265,7 @@ D.C. album", "what's stuck in my wishlist?", "find FLAC copies of the albums I o
 | Finding music | `search_music`, `find_match`, `search_musicbrainz`, `get_artist`, `get_album` |
 | Downloading | `download`, `download_album`, `download_track`, `search_soulseek`, `download_files` |
 | Downloads and wishlist | `list_downloads`, `get_download`, `wait_for_download`, `cancel_download`, `retry_download`, `retry_wishlist`, `remove_download`, `clear_finished_downloads` |
-| Library | `list_library`, `search_library`, `get_library_album`, `upgrade_library_album`, `get_match_candidates`, `match_library_album`, `delete_library_album`, `delete_library_track`, `rescan_library` |
+| Library | `list_library`, `search_library`, `get_library_album`, `upgrade_library_album`, `get_match_candidates`, `match_library_album`, `delete_library_album`, `delete_library_track`, `rescan_library`, `cancel_library_scan` |
 | Importing | `list_import_folders`, `get_match_candidates`, `import_folder` |
 | Watchlist | `list_watchlist`, `watch_artist`, `unwatch_artist`, `check_new_releases` |
 | Settings and status | `get_status`, `get_settings`, `update_settings`, `test_jellyfin`, `test_acoustid`, `reconnect_soulseek`, `rescan_shares` |
@@ -348,7 +348,8 @@ and download files Seeker can access; check their permissions before switching.
 - **The library stopped updating**: Seeker can't see your music, usually because a network share isn't mounted, so
   it keeps the index. It looks again every 10 minutes, or press **Rescan** on the Library page.
 - **A library scan makes the server or the share slow**: set `SEEKER_SCAN_CONCURRENCY` to read fewer files at once
-  (`2`, say), or more for a fast NAS.
+  (`2`, say), or more for a fast NAS. Press **Stop** on the Library page to stop a scan for now; the next one continues
+  where it left off.
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.
