@@ -76,7 +76,14 @@ export function eachLimit<T>(items: Iterable<T>, limit: number, work: (item: T, 
       while (!failure && running < limit && next < queue.length) {
         const item = queue[next++]!
         running++
-        work(item, add).then(
+        // A synchronous throw counts as that item failing, like a rejection.
+        let started: Promise<void>
+        try {
+          started = work(item, add)
+        } catch (error) {
+          started = Promise.reject(error)
+        }
+        started.then(
           () => {
             running--
             pump()
