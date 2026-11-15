@@ -19,6 +19,9 @@ export type Behaviour =
   | 'reject'
   // Drops out of slskd's transfer list after the first poll, as if slskd had restarted.
   | 'vanish'
+  // Completes with the file at its final name but empty, filled in `moveDelayMs` later: slskd copying
+  // a download out of an incomplete folder on another file system.
+  | 'slow-move'
 
 export interface SharedFile {
   // Full remote path as Soulseek reports it, e.g. "@@alice\\Music\\Artist\\Album\\01 - Song.flac".
@@ -195,6 +198,8 @@ export class FakeSlskd {
   searchPollsInProgress = 1
   // Polls of GET transfers/downloads a succeeding transfer spends "InProgress" before it completes.
   transferPollsInProgress = 2
+  // How long a 'slow-move' file stays empty after its transfer completes.
+  moveDelayMs = 4000
   readonly peers = new Map<string, Peer>()
   readonly searches: FakeSearch[] = []
   readonly transfers: FakeTransfer[] = []
@@ -555,8 +560,9 @@ export class FakeSlskd {
         transfer.averageSpeed = 0
         return
       case 'succeed':
+      case 'slow-move':
         if (transfer.polls <= this.transferPollsInProgress) return progress(transfer.polls / (this.transferPollsInProgress + 1))
-        // The file is in place before slskd reports the transfer as done.
+        // The file is in place before slskd reports the transfer as done (or, moving slowly, its name is).
         transfer.deliveredTo = await this.#deliver(transfer)
         transfer.state = 'Completed, Succeeded'
         transfer.bytesTransferred = transfer.size
@@ -574,7 +580,12 @@ export class FakeSlskd {
       const ext = path.extname(name)
       target = path.join(dir, `${name.slice(0, name.length - ext.length)}_${dotnetTicks()}${ext}`)
     }
-    await fs.copyFile(transfer.fixture, target)
+    if (transfer.behaviour === 'slow-move') {
+      await fs.writeFile(target, '')
+      setTimeout(() => void fs.copyFile(transfer.fixture, target).catch(() => {}), this.moveDelayMs).unref()
+    } else {
+      await fs.copyFile(transfer.fixture, target)
+    }
     return target
   }
 

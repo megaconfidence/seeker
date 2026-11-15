@@ -50,5 +50,7 @@ export const config = {
     searchGapMs: num('SEEKER_SEARCH_GAP_MS', 2000),
     searchIdleMs: num('SEEKER_SEARCH_IDLE_MS', 12_000),
     locateMs: num('SEEKER_LOCATE_MS', 30_000),
+    // How long slskd may take to move a finished download into place (it copies across file systems).
+    moveWaitMs: num('SEEKER_MOVE_WAIT_MS', 60 * 60_000),
   },
 }

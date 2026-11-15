@@ -800,9 +800,23 @@ function kickProcessing() {
 }
 
 // The downloads stay where they are; processing tries again later, or when the user presses Try again.
+// A file slskd is still moving into place is usually there within minutes, so that's looked at often.
 function waitToProcess(jobId: string, reason: WaitReason) {
-  store.patchJob(jobId, { next_retry_at: Date.now() + PROCESSING_RETRY_MS, waiting_for: reason })
+  const delay = reason === 'download' ? config.timing.locateMs : PROCESSING_RETRY_MS
+  store.patchJob(jobId, { next_retry_at: Date.now() + delay, waiting_for: reason })
   store.setPhase(jobId, WAIT_PHASES[reason])
+}
+
+// Tracks rejected while checking files get another source. True when that sets the job downloading.
+function replaceRejected(job: JobRow, failedTracks: number[]): boolean {
+  const runtime = rt(job.id)
+  for (const row of store.jobFiles(job.id)) if (row.state === 'failed') runtime.used.add(candidateKey(row))
+  if (!failedTracks.length || job.kind === 'files') return false
+  scheduleReplacement(job.id, failedTracks)
+  if (!jobHasWork(job.id)) return false
+  store.patchJob(job.id, { status: 'downloading', next_retry_at: null, waiting_for: null })
+  store.setPhase(job.id, 'Finding another source')
+  return true
 }
 
 async function runProcessing() {
@@ -829,20 +843,14 @@ async function runProcessing() {
       }
       if (!stillActive(job.id)) continue
       if (waitingFor) {
+        // A file slskd is still moving waits, but tracks rejected meanwhile get replaced now; the
+        // waiting file is picked up when those downloads finish.
+        if (waitingFor === 'download' && replaceRejected(job, failedTracks)) continue
         waitToProcess(job.id, waitingFor)
         continue
       }
       store.patchJob(job.id, { next_retry_at: null, waiting_for: null, error: null })
-      const runtime = rt(job.id)
-      for (const row of store.jobFiles(job.id)) if (row.state === 'failed') runtime.used.add(candidateKey(row))
-      if (failedTracks.length && job.kind !== 'files') {
-        scheduleReplacement(job.id, failedTracks)
-        if (jobHasWork(job.id)) {
-          store.patchJob(job.id, { status: 'downloading' })
-          store.setPhase(job.id, 'Finding another source')
-          continue
-        }
-      }
+      if (replaceRejected(job, failedTracks)) continue
       await settle(job.id)
     }
   } finally {

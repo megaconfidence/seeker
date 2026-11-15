@@ -131,9 +131,18 @@ async function listFiles(dir: string, out: string[] = []): Promise<string[]> {
   return out
 }
 
-// slskd marks a transfer complete just before moving it out of its incomplete folder, and renames
-// clashes to "<stem>_<ticks><ext>", so look for the file by name and size for a little while.
-export async function locateDownload(dir: string, basename: string, size: number, waitMs = 30_000): Promise<string | null> {
+export interface Located {
+  // The download at its full size.
+  file: string | null
+  // A file by that name that isn't the full size yet.
+  partial: { file: string; size: number } | null
+}
+
+// slskd marks a transfer complete before it has moved the file out of its incomplete folder. Across
+// file systems that move is a copy: the file sits at its final name, short or empty, for as long as
+// the copy takes (over a minute on NFS). Clashes are renamed "<stem>_<ticks><ext>". So only a file of
+// the expected size counts, looked for until `waitMs` runs out.
+export async function locateDownload(dir: string, basename: string, size: number, waitMs = 30_000): Promise<Located> {
   const ext = path.extname(basename)
   const stem = basename.slice(0, basename.length - ext.length)
   const clash = new RegExp(`^${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_\\d{15,}${ext.replace('.', '\\.')}$`)
@@ -144,17 +153,18 @@ export async function locateDownload(dir: string, basename: string, size: number
       const name = path.basename(file)
       return name === basename || clash.test(name)
     })
+    let partial: Located['partial'] = null
     for (const file of named) {
       try {
         const stat = await fs.stat(file)
-        if (!size || stat.size === size) return file
+        if (!size || stat.size === size) return { file, partial: null }
+        partial ??= { file, size: stat.size }
       } catch {
         // gone
       }
     }
-    if (named.length === 1 && !size) return named[0]!
-    if (Date.now() > deadline) return named[0] ?? null
-    await sleep(1000)
+    if (Date.now() >= deadline) return { file: null, partial }
+    await sleep(Math.min(1000, deadline - Date.now()))
   }
 }
 

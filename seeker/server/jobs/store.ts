@@ -16,12 +16,14 @@ import { emit } from '../events.ts'
 
 // Downloads that can't be filed yet are kept, and the job waits in `processing` until next_retry_at.
 // `retry`: processing failed for another reason, and trying straight away would only fail again.
-export type WaitReason = 'music' | 'space' | 'retry'
+// `download`: slskd says a transfer is done, but its file isn't in place at full size yet.
+export type WaitReason = 'music' | 'space' | 'retry' | 'download'
 
 export const WAIT_PHASES: Record<WaitReason, string> = {
   music: 'Waiting for the music folder',
   space: 'Waiting for free space',
   retry: 'Waiting to try again',
+  download: 'Waiting for slskd to finish moving the file',
 }
 
 export interface JobRow {

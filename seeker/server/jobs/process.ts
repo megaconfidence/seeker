@@ -265,13 +265,17 @@ const MUSIC_UNAVAILABLE = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE
 // Seeker's own copies in its data folder), freeing space fixes it.
 const NO_SPACE = new Set(['ENOSPC', 'EDQUOT'])
 const errorCode = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code ?? ''
+// How long a finished download may be missing altogether before Seeker decides it isn't coming.
+const MISSING_DOWNLOAD_MS = 5 * 60_000
 
-const WAIT_HINTS: Record<Exclude<WaitReason, 'retry'>, string> = {
+type StorageWait = Exclude<WaitReason, 'retry' | 'download'>
+
+const WAIT_HINTS: Record<StorageWait, string> = {
   music: 'retry once the folder is back',
   space: 'retry once there’s free space',
 }
 
-function waitFor(jobId: string, reason: Exclude<WaitReason, 'retry'>, message: string) {
+function waitFor(jobId: string, reason: StorageWait, message: string) {
   if (store.getJob(jobId)?.error !== message) store.logJob(jobId, 'warn', `${message} Downloads are kept; ${WAIT_HINTS[reason]}.`)
   store.patchJob(jobId, { error: message })
   store.setPhase(jobId, WAIT_PHASES[reason])
@@ -341,7 +345,25 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
       local = (await exists(row.local_path)) ? row.local_path : null
     } else {
       const basename = row.filename.split(/[\\/]/).pop() ?? row.filename
-      local = await locateDownload(dir, basename, row.size, config.timing.locateMs)
+      // Only the first look waits; while slskd moves files, the job looks again every SEEKER_LOCATE_MS.
+      const waiting = job.waiting_for === 'download' || waitingFor === 'download'
+      const found = await locateDownload(dir, basename, row.size, waiting ? 0 : config.timing.locateMs)
+      local = found.file
+      // A short file by that name is slskd still copying it into place. No file at all may be a
+      // downloads folder slskd and Seeker don't share, or a network share that hasn't listed it yet.
+      const since = Date.now() - row.updated_at
+      if (!local && since < (found.partial ? config.timing.moveWaitMs : Math.min(config.timing.moveWaitMs, MISSING_DOWNLOAD_MS))) {
+        if (!waiting) store.logJob(jobId, 'info', `${name}: slskd hasn’t finished moving the file into ${dir} yet; Seeker keeps looking`)
+        waitingFor ??= 'download'
+        continue
+      }
+      if (!local && found.partial) {
+        const message = `the downloaded file is ${found.partial.size} bytes, not ${row.size}`
+        store.patchFile(row.id, { state: 'failed', error: message })
+        store.logJob(jobId, 'error', `${name}: slskd said the download was done, but after ${Math.round(since / 60_000)} minutes ${message}`)
+        if (track && !isImport) failedTracks.push(track.index)
+        continue
+      }
     }
     if (!local) {
       store.patchFile(row.id, {

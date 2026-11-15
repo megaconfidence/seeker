@@ -102,6 +102,7 @@ Object.assign(process.env, {
   SEEKER_SEARCH_GAP_MS: '1',
   SEEKER_SEARCH_IDLE_MS: '1000',
   SEEKER_LOCATE_MS: '2000',
+  SEEKER_MOVE_WAIT_MS: '6000',
   SEEKER_STATUS_MS: '300',
   SEEKER_SHARE_MINUTE_MS: '300',
   SEEKER_LOG_LEVEL: process.env.SEEKER_LOG_LEVEL || 'error',
@@ -648,6 +649,43 @@ test('track: a transfer that disappears from slskd is given up after the missing
     dump(job.id),
   )
   assert.deepEqual(await listFiles(path.join(dirs.music, 'Static Hum', 'Lost Signal (2013)')), ['01 - Faint Echo.flac'])
+})
+
+test('track: a finished download slskd is still moving into place is waited for, then filed', { timeout: 30_000 }, async () => {
+  const tracks: Track[] = [{ title: 'Slow Water', track: 1, duration: 16, fixture: s16 }]
+  metadata.addAlbum(deezerAlbum(1020, { id: 520, name: 'Long Haul' }, 'Freight', 2019, tracks))
+  // Longer than the first look (SEEKER_LOCATE_MS, 2 s), shorter than giving up (SEEKER_MOVE_WAIT_MS, 6 s).
+  slskd.moveDelayMs = 4000
+  slskd.addPeer({ username: 'mover', freeSlot: true, uploadSpeed: 9_000_000, files: folderOf('@@mover\\Music\\Long Haul - Freight', tracks, { behaviour: () => 'slow-move' }) })
+
+  const job = await engine.queueTrack(trackId(1020, 0), 'ui')
+  await waitFor('the job to wait for slskd', () => store.toDetail(store.getJob(job.id)!).phase === 'Waiting for slskd to finish moving the file', 15_000, () => dump(job.id))
+  const row = await finished(job.id)
+  assert.equal(row.status, 'completed', dump(job.id))
+  assert.deepEqual(store.jobFiles(job.id).map((file) => [file.username, file.state]), [['mover', 'imported']], dump(job.id))
+  assert.ok(logOf(job.id).some((message) => message.includes('slskd hasn’t finished moving the file')), dump(job.id))
+  const filed = path.join(dirs.music, 'Long Haul', 'Freight (2019)', '01 - Slow Water.flac')
+  assert.equal((await fs.stat(filed)).size > 10_000, true)
+})
+
+test('track: a download that never reaches its full size is given up after the move wait and fetched elsewhere', { timeout: 30_000 }, async () => {
+  const tracks: Track[] = [{ title: 'Half Way', track: 1, duration: 17, fixture: s17 }]
+  metadata.addAlbum(deezerAlbum(1021, { id: 521, name: 'Long Haul' }, 'Stranded', 2020, tracks))
+  slskd.moveDelayMs = 10 * 60_000
+  slskd.addPeer({ username: 'stuck', freeSlot: true, uploadSpeed: 9_000_000, files: folderOf('@@stuck\\Music\\Long Haul - Stranded', tracks, { behaviour: () => 'slow-move' }) })
+  slskd.addPeer({ username: 'whole', freeSlot: false, queueLength: 1, files: folderOf('@@whole\\Music\\Long Haul\\Stranded', tracks) })
+
+  const job = await engine.queueTrack(trackId(1021, 0), 'ui')
+  const row = await finished(job.id)
+  assert.equal(row.status, 'completed', dump(job.id))
+  assert.deepEqual(
+    store.jobFiles(job.id).map((file) => [file.username, file.state, file.error]),
+    [
+      ['stuck', 'failed', `the downloaded file is 0 bytes, not ${sizes.get(s17)}`],
+      ['whole', 'imported', null],
+    ],
+    dump(job.id),
+  )
 })
 
 test('album: nobody has it → wanted with a retry time; retrying searches again', { timeout: 30_000 }, async () => {
