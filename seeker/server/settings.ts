@@ -79,6 +79,8 @@ export function updateSettings(patch: Partial<{ [K in Section]: Partial<Settings
 }
 
 function normalizeShares(settings: Settings) {
-  // Older databases may contain zero or sub-minute periods that the API used to accept.
-  if (!Number.isFinite(settings.shares.quietMinutes) || settings.shares.quietMinutes < 1) settings.shares.quietMinutes = 1
+  // Saved settings may be from before the 1–1440 limit, or edited by hand. Below it, Seeker would
+  // ask slskd again at once; far above it, setTimeout overflows and fires at once too.
+  const minutes = Number(settings.shares.quietMinutes)
+  settings.shares.quietMinutes = Number.isFinite(minutes) ? Math.min(1440, Math.max(1, minutes)) : DEFAULT_SETTINGS.shares.quietMinutes
 }
