@@ -5,8 +5,9 @@ import { Readable } from 'node:stream'
 import { parseFile } from 'music-metadata'
 import type { LibraryAlbum, LibraryAlbumDetail, LibraryArtist, LibraryTrack } from '../../shared/types.ts'
 import { config } from '../config.ts'
-import { all, get } from '../db.ts'
+import { all, exec, get } from '../db.ts'
 import { libraryAlbumRung } from './manage.ts'
+import { COVER_UNCHECKED } from './scan.ts'
 
 const MIME: Record<string, string> = {
   '.flac': 'audio/flac',
@@ -56,9 +57,11 @@ interface TrackRow {
   sample_rate: number | null
   bit_depth: number | null
   lossless: number
+  // 1 embedded art, 0 none, COVER_UNCHECKED not looked for yet.
   has_cover: number
 }
 
+// `hasEmbedded`: some track has embedded art, or hasn't been checked yet (albumCover checks).
 function toAlbum(row: AlbumRow, hasEmbedded: boolean): LibraryAlbum {
   return {
     id: row.id,
@@ -113,7 +116,7 @@ export function listAlbums(options: { q?: string; artist?: string; sort?: string
           ? 'a.year DESC, a.artist COLLATE NOCASE'
           : 'a.added_at DESC'
   const rows = all<AlbumRow & { embedded: number }>(
-    `SELECT a.*, EXISTS(SELECT 1 FROM lib_tracks t WHERE t.album_id = a.id AND t.has_cover = 1) AS embedded
+    `SELECT a.*, EXISTS(SELECT 1 FROM lib_tracks t WHERE t.album_id = a.id AND t.has_cover != 0) AS embedded
      FROM lib_albums a ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY ${order} LIMIT 2000`,
     params,
   )
@@ -129,7 +132,7 @@ export function getAlbum(id: string): LibraryAlbumDetail | null {
   )
   const unsorted = path.relative(config.musicDir, row.dir).split(path.sep)[0] === '_Unsorted'
   return {
-    album: toAlbum(row, tracks.some((track) => track.has_cover === 1)),
+    album: toAlbum(row, tracks.some((track) => track.has_cover !== 0)),
     tracks: tracks.map(toTrack),
     canUpgrade: !libraryAlbumRung(id).best,
     unsorted,
@@ -224,12 +227,23 @@ export async function albumCover(id: string): Promise<Response> {
   } catch {
     // not cached yet
   }
-  const track = get<{ path: string }>('SELECT path FROM lib_tracks WHERE album_id = ? AND has_cover = 1 LIMIT 1', [id])
+  // Library scans don't read covers, so embedded art is looked for here, the first time the album is
+  // shown, and the answer kept in has_cover.
+  const track = get<{ id: number; path: string; has_cover: number }>(
+    `SELECT id, path, has_cover FROM lib_tracks WHERE album_id = ? AND has_cover != 0
+     ORDER BY has_cover DESC, COALESCE(disc_no, 1), COALESCE(track_no, 999) LIMIT 1`,
+    [id],
+  )
   if (!track) return new Response('Not found', { status: 404 })
   try {
     const meta = await parseFile(track.path, { skipCovers: false, duration: false })
     const picture = meta.common.picture?.[0]
-    if (!picture) return new Response('Not found', { status: 404 })
+    if (!picture) {
+      // An album's files nearly always share their art, so one without it settles the album.
+      exec('UPDATE lib_tracks SET has_cover = 0 WHERE album_id = ? AND (has_cover = ? OR id = ?)', [id, COVER_UNCHECKED, track.id])
+      return new Response('Not found', { status: 404 })
+    }
+    if (track.has_cover !== 1) exec('UPDATE lib_tracks SET has_cover = 1 WHERE id = ?', [track.id])
     await fs.mkdir(cacheDir, { recursive: true })
     await fs.writeFile(cached, picture.data)
     return new Response(Buffer.from(picture.data), {

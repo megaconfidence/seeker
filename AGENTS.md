@@ -179,6 +179,19 @@ reporting the last commit that built an image.
   not thrown: the files are in the music folder, and the library scan it schedules indexes them.
 - Library scans prepare album metadata before changing SQLite. Track upserts, removals and album rows commit in one
   synchronous transaction; never hold a SQLite transaction across asynchronous filesystem work.
+- Scans are slow on network shares because of round trips, not bytes: a 5,000-track NFS library took hours one
+  operation at a time. So listings and stats run 16 at a time and tag reads 12 (`eachLimit()`), with
+  `UV_THREADPOOL_SIZE=16` in the image (file reads use libuv's pool, 4 threads by default). Albums take their cover
+  image from the listing, never a second listing per album. With `duration: false`, music-metadata reads only headers;
+  `skipCovers` keeps FLAC and MP4 covers from being read (MP3s read their whole ID3v2 tag regardless). Don't add
+  `skipPostHeaders`: it drops ID3v1 tags whenever the ID3v2 tag holds anything, even an encoder name, for a 128-byte
+  saving. `test/scan.test.ts` fails if a scan reads more than 256 kB from a FLAC with a 4 MB cover and a 48 MB MP3.
+- Embedded art isn't known after a scan: `lib_tracks.has_cover` is `COVER_UNCHECKED` (-1) until `albumCover()` in
+  `serve.ts` checks a file, the first time the album is shown, and stores 1 or 0 (0 for the whole album).
+- A full scan lists and reads outside the index lock (`serializeIndex()`); only its commit waits, so post-import
+  indexing (`scanFiles()`) runs during a scan. Paths that imports or deletions change meanwhile go in
+  `changedDuringScan` (`indexedElsewhere()`), and the scan's commit leaves them alone: what it read for them is older.
+  Folders in `SKIPPED_FOLDERS` (NAS metadata, recycle bins, snapshots) are never listed.
 - Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,
   `tagForLibrary()` in `jobs/process.ts` tags a copy if it can remove the original, and otherwise fails the file.
 
@@ -201,6 +214,8 @@ reporting the last commit that built an image.
 - `test/settings.test.ts`: saved settings outside today's limits.
 - `test/library.test.ts` and `test/library-threshold.test.ts`: library scans with a missing, empty or unreadable
   music folder, the mass-removal limit, `force`, and atomic index commits.
+- `test/scan.test.ts`: scan speed and its side effects: bytes read (counted through `FileHandle.read`), NAS folders,
+  progress, one listing per folder, embedded covers checked on demand, and an import during a slowed-down full scan.
 - `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
   folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.

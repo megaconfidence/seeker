@@ -12,7 +12,7 @@ import { toCandidate } from '../soulseek/files.ts'
 import { noteLibraryChange } from '../shares.ts'
 import { qualityOf } from '../soulseek/quality.ts'
 import { rebuildOwnedIndex } from './owned.ts'
-import { AUDIO_EXTENSIONS, libraryStatus, scanLibrary } from './scan.ts'
+import { AUDIO_EXTENSIONS, indexedElsewhere, libraryStatus, scanLibrary } from './scan.ts'
 
 const IMAGE = /\.(jpe?g|png|webp|gif)$/i
 
@@ -49,6 +49,7 @@ function changed() {
 export async function deleteLibraryAlbum(id: string): Promise<number> {
   const tracks = all<{ path: string }>('SELECT path FROM lib_tracks WHERE album_id = ?', [id])
   if (tracks.length === 0) throw new Error('Album not found')
+  indexedElsewhere(tracks.map((track) => track.path))
   const dirs = new Set<string>()
   let deleted = 0
   for (const track of tracks) {
@@ -73,6 +74,7 @@ export async function deleteLibraryAlbum(id: string): Promise<number> {
 export async function deleteLibraryTrack(id: number): Promise<void> {
   const track = get<{ path: string; album_id: string }>('SELECT path, album_id FROM lib_tracks WHERE id = ?', [id])
   if (!track) throw new Error('Track not found')
+  indexedElsewhere([track.path])
   if (insideLibrary(track.path)) await fs.rm(track.path, { force: true })
   exec('DELETE FROM imports WHERE path = ?', [track.path])
   await tidy(new Set([path.dirname(track.path)]))

@@ -219,6 +219,12 @@ that isn't mounted looks just like that. If you did remove the music, press **Re
 An entirely empty music folder is guarded even for small libraries. Unreadable files and folders keep their indexed
 tracks; a forced rescan never treats those access failures as deletions.
 
+Scans read only new and changed files, several at a time, and only their tags: a 5,000-track library on a network
+share takes seconds to a few minutes the first time, and the Library page shows how far it has got. Folders NAS systems
+keep next to your music (`@eaDir`, `#recycle`, `#snapshot` and the like) are skipped. Cover art embedded in the files
+isn't read during a scan; Seeker looks for it the first time an album without a cover image in its folder is shown.
+Music that finishes downloading during a scan is added straight away.
+
 **Deletes are permanent.** Seeker has no recycle bin or undo for music files. Deleting a track or album removes its
 audio files, and upgrades permanently replace lower-quality copies after better files are filed. Back up your music
 before deleting or upgrading; the daily database backup does not contain audio.

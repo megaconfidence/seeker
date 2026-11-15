@@ -2,7 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { FolderInput, Library as LibraryIcon, Play, RefreshCw, Search, TriangleAlert, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import type { LibraryAlbum, LibraryArtist, LibraryTrack } from '../../../shared/types.ts'
+import type { LibraryAlbum, LibraryArtist, LibraryTrack, ScanProgress } from '../../../shared/types.ts'
 import { Cover } from '../components/cover.tsx'
 import { AlbumGridSkeleton, Skeleton } from '../components/skeleton.tsx'
 import { Button, Empty, PageHeader, Select, Tabs } from '../components/ui.tsx'
@@ -13,6 +13,12 @@ import { useStatus } from '../lib/live.ts'
 import { coverUrl, fromLibrary, usePlayer } from '../lib/player.tsx'
 
 type Sort = 'recent' | 'artist' | 'title' | 'year'
+
+function scanProgress(progress: ScanProgress): string | null {
+  const files = (n: number) => `${n.toLocaleString()} ${n === 1 ? 'file' : 'files'}`
+  if (progress.phase === 'listing') return `${files(progress.found)} found`
+  return progress.toRead ? `${progress.read.toLocaleString()} of ${files(progress.toRead)} read` : null
+}
 
 function AlbumTile({ album }: { album: LibraryAlbum }) {
   const player = usePlayer()
@@ -89,6 +95,9 @@ export function LibraryPage() {
 
   const scanning = status?.library.scanning || rescan.isPending
   const total = status?.library
+  const scanned = total?.progress ? scanProgress(total.progress) : null
+  // A finished scan's counts arrive just before the album list refreshes.
+  const listBehind = albums.isSuccess && albums.data.length === 0 && !artist && !!total?.tracks
 
   return (
     <div>
@@ -100,7 +109,7 @@ export function LibraryPage() {
               <X className="size-3.5" /> Show all artists
             </button>
           ) : total ? (
-            `${plural(total.albums, 'album')} · ${plural(total.tracks, 'track')}`
+            `${plural(total.albums, 'album')} · ${plural(total.tracks, 'track')}${total.progress ? ` · Scanning${scanned ? ` · ${scanned}` : ''}` : ''}`
           ) : undefined
         }
         actions={
@@ -165,8 +174,12 @@ export function LibraryPage() {
       </div>
 
       {tab === 'albums' || artist ? (
-        albums.isPending ? (
+        albums.isPending || listBehind ? (
           <AlbumGridSkeleton />
+        ) : shownAlbums.length === 0 && scanning && !filter ? (
+          <Empty icon={<LibraryIcon className="size-6" />} title="Scanning your music folder">
+            {scanned ? `${scanned} so far. ` : ''}Albums show up here when the scan finishes.
+          </Empty>
         ) : shownAlbums.length === 0 ? (
           <Empty icon={<LibraryIcon className="size-6" />} title={filter ? 'No matching albums' : 'Your library is empty'}>
             {filter ? (

@@ -172,6 +172,11 @@ const migrations = [
   `
   ALTER TABLE jobs ADD COLUMN waiting_for TEXT;
   `,
+  // lib_tracks.has_cover gains -1, not checked yet (library/scan.ts COVER_UNCHECKED). Builds that
+  // skipped covers while scanning stored 0 for every track, so earlier 0s are checked again.
+  `
+  UPDATE lib_tracks SET has_cover = -1 WHERE has_cover = 0;
+  `,
 ]
 
 const { user_version: current } = db.prepare('PRAGMA user_version').get() as { user_version: number }

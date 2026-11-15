@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { parseFile } from 'music-metadata'
-import type { LibraryProblem, LibraryStatus, ScanResult } from '../../shared/types.ts'
+import type { Dirent } from 'node:fs'
+import type { LibraryProblem, LibraryStatus, ScanProgress, ScanResult } from '../../shared/types.ts'
 import { config } from '../config.ts'
 import { all, exec, get, getMeta, setMeta, transaction } from '../db.ts'
 import { emit } from '../events.ts'
@@ -10,7 +11,7 @@ import { folderMessage, folderProblem, fsReason } from '../folders.ts'
 import { logger } from '../log.ts'
 import { normalize, stripExtras } from '../match/normalize.ts'
 import { noteInitialLibrary, noteLibraryChange } from '../shares.ts'
-import { errorMessage } from '../util.ts'
+import { eachLimit, errorMessage } from '../util.ts'
 import { rebuildOwnedIndex } from './owned.ts'
 
 const log = logger('library')
@@ -18,20 +19,45 @@ const log = logger('library')
 export const AUDIO_EXTENSIONS = new Set(['.flac', '.mp3', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav', '.aiff', '.aif', '.wv', '.ape', '.alac'])
 const COVER_NAMES = ['cover', 'folder', 'front', 'album', 'albumart']
 const COVER_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
+// What NAS systems keep next to the music (Synology, QNAP, Windows shares, ext4). Never music, and
+// snapshots would add every track again.
+const SKIPPED_FOLDERS = new Set(['@eadir', '#recycle', '#snapshot', '@recycle', '@recently-snapshot', '$recycle.bin', 'lost+found'])
+// Listings, stats and tag reads mostly wait on the disk or the network share, so several run at
+// once. File reads use libuv's thread pool, which the image enlarges (UV_THREADPOOL_SIZE).
+const LIST_CONCURRENCY = 16
+const READ_CONCURRENCY = 12
+// lib_tracks.has_cover for embedded art nobody has looked for yet. Scans don't read covers;
+// albumCover() in serve.ts checks the first time an album is shown, and stores 1 or 0.
+export const COVER_UNCHECKED = -1
 // How soon to look again when the music folder seemed unmounted.
 const RETRY_MS = 10 * 60_000
+// How often a running scan reports its progress: to the web app, and to the log on long scans.
+const PROGRESS_EVENT_MS = 500
+const PROGRESS_LOG_MS = 15_000
 
 let scanning = false
 let pending: { force: boolean } | null = null
 let problem: LibraryProblem | null = null
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let indexWork = Promise.resolve()
+let progress: ScanProgress | null = null
+let progressEventAt = 0
+let progressLogAt = 0
+// Paths that imports and deletions changed while a full scan was reading files: what the scan read
+// for them is older, so it leaves them alone.
+let changedDuringScan: Set<string> | null = null
 
-// Full scans and post-import indexing must not prepare album snapshots over one another.
+// Commits to the index (full scans and post-import indexing) must not prepare album snapshots over
+// one another. Only commits wait here: a full scan lists and reads files first, without waiting.
 function serializeIndex<T>(run: () => Promise<T>): Promise<T> {
   const next = indexWork.then(run)
   indexWork = next.then(() => {}, () => {})
   return next
+}
+
+// Imports and deletions that change these paths' rows while a full scan runs.
+export function indexedElsewhere(paths: Iterable<string>) {
+  if (changedDuringScan) for (const file of paths) changedDuringScan.add(file)
 }
 
 export function libraryCounts() {
@@ -41,7 +67,26 @@ export function libraryCounts() {
 }
 
 export function libraryStatus(): LibraryStatus {
-  return { ...libraryCounts(), scanning, problem }
+  return { ...libraryCounts(), scanning, problem, progress: progress && { ...progress } }
+}
+
+const count = (n: number) => n.toLocaleString('en')
+
+function reportProgress(force = false) {
+  if (!progress) return
+  const now = Date.now()
+  if (now - progressLogAt >= PROGRESS_LOG_MS) {
+    progressLogAt = now
+    log.info(
+      progress.phase === 'listing'
+        ? `Library scan: ${count(progress.found)} files found so far`
+        : `Library scan: read ${count(progress.read)} of ${count(progress.toRead)} new or changed files`,
+    )
+  }
+  if (force || now - progressEventAt >= PROGRESS_EVENT_MS) {
+    progressEventAt = now
+    announce()
+  }
 }
 
 function announce() {
@@ -87,32 +132,65 @@ interface Entry {
   size: number
 }
 
-// Folders that can't be read are collected rather than skipped, so their tracks aren't taken as
-// deleted. Only failing to read the music folder itself is an error.
-async function walk(dir: string, out: Entry[], unreadable: string[], unreadableFiles: Set<string>, root = false) {
-  let entries: import('node:fs').Dirent[]
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true })
-  } catch (error) {
-    if (root) throw error
-    // A folder that vanished during the scan is simply gone; anything else may come back.
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') unreadable.push(dir)
-    return
-  }
-  for (const entry of entries) {
-    if (entry.name.startsWith('.')) continue
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) {
-      await walk(full, out, unreadable, unreadableFiles)
-    } else if (entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+interface Listing {
+  files: Entry[]
+  unreadable: string[]
+  unreadableFiles: Set<string>
+  // Every folder listed, with its cover image or null, so building albums needs no second listing.
+  covers: Map<string, string | null>
+}
+
+const errno = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code
+const byPath = (a: { file: string } | { path: string }, b: { file: string } | { path: string }) => {
+  const left = 'file' in a ? a.file : a.path
+  const right = 'file' in b ? b.file : b.path
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
+// Lists the music folder, several folders and files at a time: on a network share each listing
+// and stat is a round trip. Folders that can't be read are collected rather than skipped, so their
+// tracks aren't taken as deleted. Only failing to read the music folder itself is an error.
+async function list(root: string, onFile: () => void): Promise<Listing> {
+  const listing: Listing = { files: [], unreadable: [], unreadableFiles: new Set(), covers: new Map() }
+  type Task = { dir: string } | { file: string }
+  await eachLimit<Task>([{ dir: root }], LIST_CONCURRENCY, async (task, add) => {
+    if ('file' in task) {
       try {
-        const stat = await fs.stat(full)
-        out.push({ file: full, mtime: Math.floor(stat.mtimeMs), size: stat.size })
+        const stat = await fs.stat(task.file)
+        listing.files.push({ file: task.file, mtime: Math.floor(stat.mtimeMs), size: stat.size })
+        onFile()
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') unreadableFiles.add(full)
+        if (errno(error) !== 'ENOENT') listing.unreadableFiles.add(task.file)
+      }
+      return
+    }
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(task.dir, { withFileTypes: true })
+    } catch (error) {
+      if (task.dir === root) throw error
+      // A folder that vanished during the scan is simply gone; anything else may come back.
+      if (errno(error) !== 'ENOENT') listing.unreadable.push(task.dir)
+      return
+    }
+    const images: string[] = []
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue
+      const full = path.join(task.dir, entry.name)
+      const ext = path.extname(entry.name).toLowerCase()
+      if (entry.isDirectory()) {
+        if (!SKIPPED_FOLDERS.has(entry.name.toLowerCase())) add({ dir: full })
+      } else if (entry.isFile() && AUDIO_EXTENSIONS.has(ext)) {
+        add({ file: full })
+      } else if (entry.isFile() && COVER_EXTENSIONS.includes(ext)) {
+        images.push(entry.name)
       }
     }
-  }
+    listing.covers.set(task.dir, pickCover(task.dir, images))
+  })
+  // Several at a time finish in any order; sorted, track ids and logs come out the same every time.
+  listing.files.sort(byPath)
+  return listing
 }
 
 function first(value: string | string[] | undefined): string | undefined {
@@ -120,8 +198,11 @@ function first(value: string | string[] | undefined): string | undefined {
   return value
 }
 
+// Tags and stream details, without cover images: in FLAC and MP4 files those are most of what
+// would be read. (MP3s read their whole ID3v2 tag either way.) skipPostHeaders isn't used: it
+// drops ID3v1 tags when the ID3v2 tag holds anything at all, even just an encoder name.
 async function readTrack(file: string, mtime: number, size: number) {
-  const meta = await parseFile(file, { skipCovers: false, duration: false })
+  const meta = await parseFile(file, { skipCovers: true, duration: false })
   const common = meta.common
   const format = meta.format
   const dirName = path.basename(path.dirname(file))
@@ -152,7 +233,7 @@ async function readTrack(file: string, mtime: number, size: number) {
     mb_album_id: common.musicbrainz_albumid ?? null,
     norm_artist: normalize(artist),
     norm_title: normalize(stripExtras(title)),
-    has_cover: common.picture && common.picture.length > 0 ? 1 : 0,
+    has_cover: COVER_UNCHECKED,
   }
 }
 
@@ -202,22 +283,26 @@ export function formatLabel(codec: string | null, lossless: boolean, bitDepth: n
   return bitrate ? `${label} ${bitrate}` : label
 }
 
-async function findCover(dir: string): Promise<string | null> {
-  let entries: string[]
-  try {
-    entries = await fs.readdir(dir)
-  } catch {
-    return null
-  }
-  const lower = new Map(entries.map((name) => [name.toLowerCase(), name]))
+// A folder's cover among its images: cover.jpg, folder.jpg… first, then any image.
+function pickCover(dir: string, images: string[]): string | null {
+  const lower = new Map(images.map((name) => [name.toLowerCase(), name]))
   for (const base of COVER_NAMES) {
     for (const ext of COVER_EXTENSIONS) {
       const name = lower.get(base + ext)
       if (name) return path.join(dir, name)
     }
   }
-  const anyImage = entries.find((name) => COVER_EXTENSIONS.includes(path.extname(name).toLowerCase()))
-  return anyImage ? path.join(dir, anyImage) : null
+  return images[0] ? path.join(dir, images[0]) : null
+}
+
+async function findCover(dir: string): Promise<string | null> {
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true })
+    const images = entries.filter((entry) => entry.isFile() && !entry.name.startsWith('.') && COVER_EXTENSIONS.includes(path.extname(entry.name).toLowerCase()))
+    return pickCover(dir, images.map((entry) => entry.name))
+  } catch {
+    return null
+  }
 }
 
 function commonDir(paths: string[]): string {
@@ -232,7 +317,8 @@ function commonDir(paths: string[]): string {
 type AlbumTrack = TrackRow & { added_at: number }
 type AlbumRow = Record<string, string | number | null>
 
-async function prepareAlbums(rows: AlbumTrack[]): Promise<AlbumRow[]> {
+// `covers` are the cover images a full scan found while listing; other folders are looked at here.
+async function prepareAlbums(rows: AlbumTrack[], covers?: Map<string, string | null>): Promise<AlbumRow[]> {
   const groups = new Map<string, typeof rows>()
   for (const row of rows) {
     const list = groups.get(row.album_id) ?? []
@@ -265,7 +351,7 @@ async function prepareAlbums(rows: AlbumTrack[]): Promise<AlbumRow[]> {
       artist: firstTrack.album_artist,
       year: years.length ? Math.min(...years) : null,
       dir,
-      cover: await findCover(dir),
+      cover: covers?.has(dir) ? (covers.get(dir) ?? null) : await findCover(dir),
       track_count: tracks.length,
       duration: tracks.reduce((sum, track) => sum + (track.duration ?? 0), 0),
       format,
@@ -296,7 +382,8 @@ function writeAlbums(albums: AlbumRow[], albumIds?: Set<string>) {
   }
 }
 
-async function commitIndex(updates: TrackRow[], gone: string[], albumIds?: Set<string>, markIndexed = false) {
+async function commitIndex(updates: TrackRow[], gone: string[], options: { albumIds?: Set<string>; markIndexed?: boolean; covers?: Map<string, string | null> } = {}) {
+  const { albumIds, markIndexed = false, covers } = options
   const where = albumIds ? `WHERE album_id IN (${[...albumIds].map(() => '?').join(',')})` : ''
   const current = all<AlbumTrack>(`SELECT * FROM lib_tracks ${where}`, albumIds ? [...albumIds] : [])
   const projected = new Map(current.map((row) => [row.path, row]))
@@ -304,7 +391,7 @@ async function commitIndex(updates: TrackRow[], gone: string[], albumIds?: Set<s
   const now = Date.now()
   for (const row of updates) projected.set(row.path, { ...row, added_at: projected.get(row.path)?.added_at ?? now })
   // All asynchronous cover discovery finishes before the synchronous transaction starts.
-  const albums = await prepareAlbums([...projected.values()])
+  const albums = await prepareAlbums([...projected.values()], covers)
   transaction(() => {
     for (const row of updates) upsertTrack(row, now)
     for (const file of gone) exec('DELETE FROM lib_tracks WHERE path = ?', [file])
@@ -333,7 +420,7 @@ export async function scanLibrary(options: { force?: boolean } = {}): Promise<Sc
   scanning = true
   announce()
   try {
-    return await serializeIndex(() => scan(!!options.force))
+    return await scan(!!options.force)
   } catch (error) {
     log.error('Library scan failed', error)
     return refuse(`The library scan failed: ${errorMessage(error)}.`, 0, false, false)
@@ -363,6 +450,19 @@ function refuse(message: string, missing: number, canForce: boolean, retry: bool
 }
 
 async function scan(force: boolean): Promise<ScanResult> {
+  progress = { phase: 'listing', found: 0, read: 0, toRead: 0 }
+  progressLogAt = Date.now()
+  changedDuringScan = new Set()
+  reportProgress(true)
+  try {
+    return await scanFolder(force)
+  } finally {
+    progress = null
+    changedDuringScan = null
+  }
+}
+
+async function scanFolder(force: boolean): Promise<ScanResult> {
   const started = Date.now()
   const dir = config.musicDir
   clearTimeout(retryTimer)
@@ -370,16 +470,18 @@ async function scan(force: boolean): Promise<ScanResult> {
     all<{ path: string; mtime: number; size: number }>('SELECT path, mtime, size FROM lib_tracks').map((row) => [row.path, row]),
   )
   const firstScan = known.size === 0 && getMeta('library_indexed') !== '1'
-  const files: Entry[] = []
-  const unreadable: string[] = []
-  const unreadableFiles = new Set<string>()
+  let listing: Listing
   try {
     // Never created here: creating it would hide a share that isn't mounted.
     if (!(await fs.stat(dir)).isDirectory()) throw Object.assign(new Error(`${dir} isn’t a folder`), { code: 'ENOTDIR' })
-    await walk(dir, files, unreadable, unreadableFiles, true)
+    listing = await list(dir, () => {
+      progress!.found++
+      reportProgress()
+    })
   } catch (error) {
     return refuse(`Seeker can’t read the music folder, ${dir} (${fsReason(error)}). ${unmountedHint}`, known.size, false, true)
   }
+  const { files, unreadable, unreadableFiles, covers } = listing
   if (files.length === 0 && known.size > 0) {
     if (unreadable.length || unreadableFiles.size) {
       const paths = [...unreadable, ...unreadableFiles].slice(0, 3).join(', ')
@@ -400,17 +502,28 @@ async function scan(force: boolean): Promise<ScanResult> {
     )
   }
 
-  const updates: TrackRow[] = []
-  for (const entry of files) {
+  const toRead = files.filter((entry) => {
     const existing = known.get(entry.file)
-    if (existing && existing.mtime === entry.mtime && existing.size === entry.size) continue
+    return !existing || existing.mtime !== entry.mtime || existing.size !== entry.size
+  })
+  progress = { phase: 'reading', found: files.length, read: 0, toRead: toRead.length }
+  reportProgress(true)
+  const updates: TrackRow[] = []
+  await eachLimit(toRead, READ_CONCURRENCY, async (entry) => {
     try {
       updates.push(await readTrack(entry.file, entry.mtime, entry.size))
     } catch (error) {
       log.warn(`Could not read ${entry.file}`, error)
     }
-  }
-  await commitIndex(updates, gone, undefined, true)
+    progress!.read++
+    reportProgress()
+  })
+  updates.sort(byPath)
+  await serializeIndex(() => {
+    // An import or deletion that changed a path while this scan read files knows better.
+    const current = (file: string) => !changedDuringScan!.has(file)
+    return commitIndex(updates.filter((row) => current(row.path)), gone.filter(current), { markIndexed: true, covers })
+  })
   const updated = updates.length
   if (updated || gone.length) {
     if (firstScan) noteInitialLibrary()
@@ -427,11 +540,23 @@ async function scan(force: boolean): Promise<ScanResult> {
   return result('done', message, { files: files.length, updated, removed: gone.length })
 }
 
-// Index specific files right after an import, without walking the whole library.
+// Index specific files right after an import, without walking the whole library. A full scan
+// that's running doesn't hold this up: it only waits for that scan's commit, if it's underway.
 export async function scanFiles(files: string[]): Promise<void> {
+  indexedElsewhere(files)
+  const updates: TrackRow[] = []
+  await eachLimit(files, READ_CONCURRENCY, async (file) => {
+    try {
+      const stat = await fs.stat(file)
+      updates.push(await readTrack(file, Math.floor(stat.mtimeMs), stat.size))
+    } catch (error) {
+      log.warn(`Could not index ${file}`, error)
+    }
+  })
+  updates.sort(byPath)
   return serializeIndex(async () => {
     try {
-      await indexFiles(files)
+      await indexFiles(files, updates)
     } catch (error) {
       // The files are on disk, so a library scan in a few minutes indexes them.
       refuse(`Indexing imported files failed: ${errorMessage(error)}.`, 0, false, true)
@@ -442,22 +567,14 @@ export async function scanFiles(files: string[]): Promise<void> {
   })
 }
 
-async function indexFiles(files: string[]): Promise<void> {
-  const albumIds = new Set<string>()
-  const updates: TrackRow[] = []
+async function indexFiles(files: string[], updates: TrackRow[]): Promise<void> {
+  // The albums the files belong to now, and the ones they belonged to before.
+  const albumIds = new Set(updates.map((row) => row.album_id))
   for (const file of files) {
     const previous = get<{ album_id: string }>('SELECT album_id FROM lib_tracks WHERE path = ?', [file])
     if (previous) albumIds.add(previous.album_id)
-    try {
-      const stat = await fs.stat(file)
-      const row = await readTrack(file, Math.floor(stat.mtimeMs), stat.size)
-      updates.push(row)
-      albumIds.add(row.album_id)
-    } catch (error) {
-      log.warn(`Could not index ${file}`, error)
-    }
   }
-  if (albumIds.size) await commitIndex(updates, [], albumIds)
+  if (albumIds.size) await commitIndex(updates, [], { albumIds })
   if (problem?.message.startsWith('Indexing imported files failed:')) problem = null
   if (updates.length) noteLibraryChange()
 }

@@ -57,7 +57,10 @@ export function useServerEvents(enabled: boolean) {
         case 'library':
           client.setQueryData<AppStatus>(['status'], (status) =>
             status
-              ? { ...status, library: { albums: event.albums, tracks: event.tracks, scanning: event.scanning, problem: event.problem } }
+              ? {
+                  ...status,
+                  library: { albums: event.albums, tracks: event.tracks, scanning: event.scanning, problem: event.problem, progress: event.progress },
+                }
               : status,
           )
           if (!event.scanning) refreshLibraryViews(client)

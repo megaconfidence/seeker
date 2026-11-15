@@ -883,7 +883,7 @@ function buildServer(): McpServer {
     {
       title: 'Seeker status',
       description:
-        'Soulseek connection and sharing, download counts, library size, the search budget, where files live and whether Seeker can write there, and the latest server warnings and errors (the first place to look when something isn’t working).',
+        'Soulseek connection and sharing, download counts, library size and how far a running library scan has got (library.progress), the search budget, where files live and whether Seeker can write there, and the latest server warnings and errors (the first place to look when something isn’t working).',
       inputSchema: {},
       annotations: local,
     },

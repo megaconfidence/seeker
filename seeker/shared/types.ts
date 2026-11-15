@@ -385,11 +385,23 @@ export interface ScanResult {
   removed: number
 }
 
+// How far a library scan has got: first it lists the folders, then reads new and changed files.
+export interface ScanProgress {
+  phase: 'listing' | 'reading'
+  // Audio files found so far.
+  found: number
+  // New or changed files read so far, and how many there are to read (known once listing ends).
+  read: number
+  toRead: number
+}
+
 export interface LibraryStatus {
   albums: number
   tracks: number
   scanning: boolean
   problem: LibraryProblem | null
+  // Only while a scan runs.
+  progress: ScanProgress | null
 }
 
 export interface AppStatus {

@@ -503,14 +503,17 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
     store.setPhase(jobId, 'Adding to library')
     const count = `${imported.length} ${imported.length === 1 ? 'track' : 'tracks'}`
     try {
-      if (touchedLibrary) await scanLibrary()
-      else await scanFiles(imported)
+      // Straight away, even during a full scan.
+      await scanFiles(imported)
       store.logJob(jobId, 'info', `Added ${count} to your library`)
     } catch (error) {
       // The files are in the music folder already and a library scan picks them up, so this isn't a
       // processing failure (which would make the job run again for nothing).
       store.logJob(jobId, 'warn', `Filed ${count}, but couldn’t add them to the library index (${errorMessage(error)}). The next library scan adds them.`)
     }
+    // A job that replaced or moved library files also needs a full scan, to drop the old copies
+    // (queued if one is running), whether or not indexing the new ones worked.
+    if (touchedLibrary) await scanLibrary().catch((error: unknown) => log.warn('Couldn’t start a library scan after filing', error))
     scheduleJellyfinRefresh()
   }
   if (waitingFor) store.setPhase(jobId, WAIT_PHASES[waitingFor])

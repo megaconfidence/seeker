@@ -60,6 +60,43 @@ export class RateLimiter {
   }
 }
 
+// Runs `work` on each item, at most `limit` at a time, starting them in order. `work` can add more
+// items while it runs (a folder walk finding subfolders). The first error stops new work and is
+// thrown once the work already started has finished.
+export function eachLimit<T>(items: Iterable<T>, limit: number, work: (item: T, add: (item: T) => void) => Promise<void>): Promise<void> {
+  const queue = [...items]
+  const add = (item: T) => {
+    queue.push(item)
+  }
+  let next = 0
+  let running = 0
+  let failure: { error: unknown } | null = null
+  return new Promise((resolve, reject) => {
+    const pump = () => {
+      while (!failure && running < limit && next < queue.length) {
+        const item = queue[next++]!
+        running++
+        work(item, add).then(
+          () => {
+            running--
+            pump()
+          },
+          (error: unknown) => {
+            running--
+            failure ??= { error }
+            pump()
+          },
+        )
+      }
+      if (running === 0 && (failure || next >= queue.length)) {
+        if (failure) reject(failure.error)
+        else resolve()
+      }
+    }
+    pump()
+  })
+}
+
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return String(error)
