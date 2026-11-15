@@ -27,13 +27,17 @@ await Promise.all([
   ff('-f', 'lavfi', '-i', 'anoisesrc=d=2:seed=1', '-c:a', 'libmp3lame', '-b:a', '128k', '-id3v2_version', '0', at('cbr.mp3')),
   ff('-f', 'lavfi', '-i', 'anoisesrc=d=2:seed=2', '-c:a', 'libmp3lame', '-q:a', '4', '-id3v2_version', '0', at('vbr.mp3')),
   ff('-f', 'lavfi', '-i', 'anoisesrc=d=2:seed=3', '-c:a', 'libmp3lame', '-b:a', '128k', '-id3v2_version', '0', '-write_xing', '0', at('bare.mp3')),
+  ff('-f', 'lavfi', '-i', 'anoisesrc=d=5', '-c:a', 'libmp3lame', '-b:a', '320k', '-id3v2_version', '0', at('five.mp3')),
   ff('-f', 'lavfi', '-i', 'nullsrc=s=400x400,geq=random(1)*255:random(1)*255:random(1)*255', '-frames:v', '1', at('art.png')),
+  ff('-f', 'lavfi', '-i', 'testsrc=s=300x300', '-frames:v', '1', at('cover.jpg')),
 ])
 const audio = {
   cbr: await fs.readFile(at('cbr.mp3')),
   vbr: await fs.readFile(at('vbr.mp3')),
   bare: await fs.readFile(at('bare.mp3')),
 }
+const five = await fs.readFile(at('five.mp3'))
+const jpeg = await fs.readFile(at('cover.jpg'))
 
 // Every byte read from files goes through FileHandle.read.
 const probe = await fs.open(at('cbr.mp3'))
@@ -106,6 +110,8 @@ interface TagOptions {
   footer?: boolean
   plainSizes?: boolean
   unsync?: boolean
+  // The size the header declares, when it isn't the real one.
+  size?: number
 }
 // Encodings: 0 latin1, 1 UTF-16 with a byte order mark, 3 UTF-8 (v2.4).
 const encode = (value: string, encoding: number) =>
@@ -147,7 +153,7 @@ function id3(major: 2 | 3 | 4, frames: Frame[], options: TagOptions = {}): Buffe
   )
   if (options.unsync) body = unsynchronise(body)
   const extended = !options.extended ? Buffer.alloc(0) : major === 4 ? Buffer.from([0, 0, 0, 6, 1, 0]) : Buffer.from([0, 0, 0, 6, 0, 0, 0, 0, 0, 0])
-  const size = extended.length + body.length + (options.padding ?? 0)
+  const size = options.size ?? extended.length + body.length + (options.padding ?? 0)
   const flags = (options.unsync ? 0x80 : 0) | (options.extended ? 0x40 : 0) | (options.footer ? 0x10 : 0)
   const footer = options.footer ? Buffer.from([0x33, 0x44, 0x49, major, 0, flags, ...synchsafe(size)]) : Buffer.alloc(0)
   return Buffer.concat([Buffer.from([0x49, 0x44, 0x33, major, 0, flags, ...synchsafe(size)]), extended, body, Buffer.alloc(options.padding ?? 0), footer])
@@ -258,6 +264,12 @@ test('hand-built v2.2, v2.3 and v2.4 tags read as music-metadata reads them', as
       Buffer.concat([id3(4, [text('TIT2', 'Newer'), text('TPE1', 'Artist'), picture(4, size)]), id3(3, [text('TIT2', 'Older'), text('TALB', 'Album'), picture(3, size)], { padding: 100 })]),
       { title: 'Newer', artist: 'Artist', album: 'Album' },
     ],
+    [
+      // The same after a v2.2 tag, where "ID3" would pass for a frame id.
+      'two-tags-v22.mp3',
+      Buffer.concat([id3(2, [text('TT2', 'Older'), text('TP1', 'Artist')]), id3(3, [text('TIT2', 'Newer'), text('TALB', 'Album'), picture(3, size)], { padding: 100 })]),
+      { title: 'Newer', artist: 'Artist', album: 'Album' },
+    ],
   ]
   for (const [name, tag, expected] of cases) {
     const { bytes } = await same(await mp3(name, tag, name === 'v24-flags.mp3' ? audio.vbr : audio.cbr), expected)
@@ -316,12 +328,14 @@ test('ID3v1 and APEv2 tags are read when the ID3v2 tag lacks the title, artist, 
 test('tags that can’t be walked frame by frame fall back to music-metadata, with the same results', async () => {
   // Tag-wide unsynchronisation in v2.3: frame sizes don't match the bytes on disk.
   await same(await mp3('unsync.mp3', id3(3, [text('TIT2', 'Ünsynced title', 1), text('TPE1', 'Artist', 1), text('TALB', 'Album')], { unsync: true }), audio.cbr), { title: 'Ünsynced title', artist: 'Artist', album: 'Album' })
-  // A frame id music-metadata only warns about, and a frame running past the end of the tag.
+  // A frame id music-metadata only warns about, and a frame running past the end of a tag the audio
+  // follows (with padding outside the tag, or not).
   const garbage = id3(3, [text('TIT2', 'Before'), blob('pr!v', 40), text('TPE1', 'After')])
   await same(await mp3('bad-id.mp3', garbage, audio.cbr))
   const overrun = id3(3, [text('TIT2', 'Overrun'), text('TPE1', 'Artist')])
   overrun.writeUInt32BE(5000, 10 + 18 + 4) // TPE1's size, after the tag header and TIT2
   await same(await mp3('overrun.mp3', overrun, audio.cbr))
+  await same(await mp3('overrun-padded.mp3', overrun, Buffer.alloc(512), audio.cbr))
   await same(await mp3('noise.mp3', Buffer.from('ID3\x03\x00\x00\x00\x00\x10\x00', 'latin1'), randomBytes(2048), audio.cbr))
   // A tag bigger than the file: both refuse it the same way.
   const truncated = await mp3('truncated.mp3', id3(3, [text('TIT2', 'Cut'), picture(3, 100_000)]).subarray(0, 20_000))
@@ -341,6 +355,68 @@ test('v2.4 tags with plain frame sizes, as old iTunes wrote them, are read whole
   assert.equal(meta.common.artist, 'iTunes Artist')
   assert.equal(meta.common.album, 'iTunes Album')
   assert.ok(bytes < BUDGET, `read ${bytes} bytes`)
+})
+
+// Issue #2: a v2.4 tag declaring 1,988 bytes, with lyrics running past that and cover art after them.
+// music-metadata looks for the audio from the declared end, takes bytes in the image for an ADTS
+// header of length 0, and fails.
+const SONG = { title: 'How This Ends', artist: 'Lewis Capaldi', album: 'Broken by Desire to Be Heavenly Sent (extended edition)', track: 11 }
+const song = (cover: Buffer): Frame[] => [
+  text('TIT2', SONG.title, 3),
+  text('TPE1', SONG.artist, 3),
+  text('TALB', SONG.album, 3),
+  text('TRCK', String(SONG.track), 3),
+  { id: 'USLT', body: Buffer.concat([Buffer.from('\x03eng\0', 'latin1'), Buffer.from('I cut free\nFrom all that we are\n'.repeat(80), 'utf8')]) },
+  { id: 'APIC', body: Buffer.concat([Buffer.from('\0image/jpeg\0\x03\0', 'latin1'), cover.subarray(0, 20), Buffer.from([0xff, 0xf1, 0x50, 0x80, 0, 0, 0]), cover.subarray(20)]) },
+]
+const FAKE_ADTS = /Invalid ADTS frame length: 0/
+
+// The song's tags, and the audio as music-metadata reads it without any tag in front.
+async function assertSong(read: Fields) {
+  const { title, artist, album, track, duration, codec, container, bitrate, sampleRate, lossless } = read
+  assert.deepEqual({ title, artist, album, track }, SONG)
+  assert.equal(codec, 'MPEG 1 Layer 3')
+  assert.ok(duration && Math.abs(duration - 5.04) < 0.01, `duration ${duration}`)
+  const bare = fields(await oldRead(at('five.mp3')))
+  assert.deepEqual({ duration, codec, container, bitrate, sampleRate, lossless }, { duration: bare.duration, codec: bare.codec, container: bare.container, bitrate: bare.bitrate, sampleRate: bare.sampleRate, lossless: bare.lossless })
+}
+
+test('an MP3 whose tag runs past its declared size is read from the tag and the audio after the cover', async () => {
+  const cover = Buffer.concat([jpeg, randomBytes(COVER)])
+  const file = await mp3('issue-2.mp3', id3(4, song(cover), { size: 1988 }), Buffer.alloc(256), five)
+  await assert.rejects(oldRead(file), FAKE_ADTS)
+  const { meta, bytes } = await measure(file)
+  await assertSong(fields(meta))
+  assert.ok(bytes < BUDGET, `read ${bytes} bytes`)
+  // A declared size that ends where the lyrics start, so no frame crosses it.
+  const boundary = id3(4, song(cover).slice(0, 4)).length - 10
+  const atBoundary = await mp3('issue-2-boundary.mp3', id3(4, song(cover), { size: boundary }), Buffer.alloc(256), five)
+  await assert.rejects(oldRead(atBoundary), FAKE_ADTS)
+  const { meta: again, bytes: alsoRead } = await measure(atBoundary)
+  await assertSong(fields(again))
+  assert.ok(alsoRead < BUDGET, `read ${alsoRead} bytes`)
+})
+
+test('junk between an intact tag and the audio is skipped, and padding reads as before', async () => {
+  const tag = id3(4, song(jpeg).slice(0, 4))
+  // An MPEG frame header that no frame follows, then, past where that frame would end, the ADTS
+  // header music-metadata fails on.
+  const junk = Buffer.concat([Buffer.from('left over from an older tag '.repeat(20)), Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.from('more junk '.repeat(50)), Buffer.from([0xff, 0xf1, 0x50, 0x80, 0, 0, 0]), Buffer.from('and more '.repeat(60))])
+  const file = await mp3('junk.mp3', tag, junk, five)
+  await assert.rejects(oldRead(file), FAKE_ADTS)
+  await assertSong(fields(await readTags(file)))
+  await assertSong((await same(await mp3('padded.mp3', tag, Buffer.alloc(4096), five))).fields)
+})
+
+test('a tag running past its size with no audio after it fails as a parse error', { timeout: 10_000 }, async () => {
+  const file = await mp3('no-audio.mp3', id3(4, song(jpeg), { size: 1988 }), Buffer.alloc(256), Buffer.from('no audio here '.repeat(4000)))
+  await assert.rejects(readTags(file), (error: unknown) => {
+    assert.ok(error instanceof Error && error.name === 'UnexpectedFileContentError', String(error))
+    assert.equal((error as { code?: unknown }).code, undefined, 'no errno code: not a read error')
+    return true
+  })
+  // Read errors keep theirs.
+  await assert.rejects(readTags(at('missing.mp3')), { code: 'ENOENT' })
 })
 
 test('Ogg Vorbis and Opus files get their duration from the last page', async () => {

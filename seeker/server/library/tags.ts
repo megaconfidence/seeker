@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import fs from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
-import { parseFromTokenizer, TrackType } from 'music-metadata'
+import { makeUnexpectedFileContentError, parseFromTokenizer, TrackType } from 'music-metadata'
 import type { IAudioMetadata, IOptions } from 'music-metadata'
 import { AbstractTokenizer, EndOfStreamError, NotRegularFileError } from 'strtok3'
 import type { IRandomAccessFileInfo, IReadChunkOptions } from 'strtok3'
@@ -272,35 +272,41 @@ async function standIn(source: FileSource): Promise<StandIn | null> {
   const reads = source.reads
   let offset = 0
   let frames = 0
+  let overran = false
   // music-metadata also reads a tag that follows straight after one, which some taggers leave.
   // A footer ("3DI") stops it there, so the footer goes with the audio, where it was skipped before.
-  while (isId3(await source.bytes(offset, 10, HEAD))) {
+  while (!overran && isId3(await source.bytes(offset, 10, HEAD))) {
     const tag = await walkTag(source, offset, reads)
     if (!tag || source.reads - reads > MAX_WALK_READS) return null
     tags.push(tag.bytes)
     frames += tag.frames
     offset = tag.end
+    overran = tag.overran
   }
   if (!tags.length) return null
-  await source.bytes(offset, AUDIO_HEAD, HEAD)
+  const audioStart = await findAudio(source, offset, overran)
+  await source.bytes(audioStart, AUDIO_HEAD, HEAD)
   const prefix = new Uint8Array(tags.reduce((sum, tag) => sum + tag.length, 0))
   let at = 0
   for (const tag of tags) {
     prefix.set(tag, at)
     at += tag.length
   }
-  return { prefix, audioStart: offset, frames }
+  return { prefix, audioStart, frames }
 }
 
 // Anything music-metadata would read differently from the frames found here (a frame id it would
-// warn about, a frame running past the tag) returns null, so it reads the tag itself.
-async function walkTag(source: FileSource, start: number, reads: number): Promise<{ bytes: Uint8Array; end: number; frames: number } | null> {
+// warn about, a frame running past a tag the audio follows) returns null, so it reads the tag itself.
+// Frames that carry on past the declared size, as some taggers write them (issue #2), are walked over
+// to find the audio, which music-metadata would look for among them, but not kept: ffmpeg and TagLib
+// don't read them either.
+async function walkTag(source: FileSource, start: number, reads: number): Promise<{ bytes: Uint8Array; end: number; frames: number; overran: boolean } | null> {
   const header = await source.bytes(start, 10, HEAD)
   if (header.length < 10) return null
   const major = header[3]!
   const flags = header[5]!
-  const end = start + 10 + synchsafe(header, 6)
-  if (major < 2 || major > 4 || end > source.size) return null
+  const declared = start + 10 + synchsafe(header, 6)
+  if (major < 2 || major > 4 || declared > source.size) return null
   // An unsynchronised v2.2 or v2.3 tag gives frame sizes without the bytes stuffed into it, so frames
   // can't be found without reading it whole. In v2.2 the 0x40 flag means compression.
   if (major < 4 && flags & 0x80) return null
@@ -311,23 +317,46 @@ async function walkTag(source: FileSource, start: number, reads: number): Promis
     if (extended.length < 4) return null
     // The v2.3 size leaves out its own 4 bytes; the synchsafe v2.4 size includes them.
     const size = major === 4 ? synchsafe(extended, 0) : uint32(extended, 0) + 4
-    if (size < (major === 4 ? 6 : 10) || position + size > end) return null
+    if (size < (major === 4 ? 6 : 10) || position + size > declared) return null
     position += size
   }
   const headerSize = major === 2 ? 6 : 10
   const kept: KeptFrame[] = []
   let keptBytes = 0
   let count = 0
-  while (position < end) {
+  // Where frames can run to: the end of the file once they've carried on past the declared size.
+  let end = declared
+  let overran = false
+  for (;;) {
+    if (position >= end) {
+      // Frames that fill the declared size exactly, and another one straight after it. (Another tag
+      // there is music-metadata's to read; "ID3" is a valid v2.2 frame id.)
+      if (overran || position !== declared || isId3(await source.bytes(position, 3, HEAD))) break
+      if (!(await frameFits(source, major, position, source.size))) break
+      overran = true
+      end = source.size
+    }
     const frame = await source.bytes(position, Math.min(headerSize, end - position), HEAD)
     // Padding, or too little left for a frame: music-metadata stops there too.
     if (frame[0] === 0 || position + headerSize > end) break
     const id = latin1(frame, 0, major === 2 ? 3 : 4)
-    if (!(major === 2 ? FRAME_ID_V22 : FRAME_ID).test(id) || ++count > MAX_FRAMES) return null
-    const size = await frameSize(source, frame, major, position, end)
+    if (!(major === 2 ? FRAME_ID_V22 : FRAME_ID).test(id) || (overran && isId3(frame))) {
+      if (overran) break
+      return null
+    }
+    if (++count > MAX_FRAMES) return null
+    let size = await frameSize(source, frame, major, position, end)
     const body = position + headerSize
-    if (body + size > end) return null
-    if (keep(id) && size <= MAX_KEPT_FRAME) {
+    if (body + size > end) {
+      if (overran) break
+      // Unless the audio starts where the tag says it ends, the frames carry on past that.
+      if (await audioAt(source, declared)) return null
+      overran = true
+      end = source.size
+      size = await frameSize(source, frame, major, position, end)
+      if (body + size > end) return null
+    }
+    if (!overran && keep(id) && size <= MAX_KEPT_FRAME) {
       keptBytes += headerSize + size
       if (keptBytes > MAX_KEPT) return null
       const data = await source.bytes(body, size, HEAD)
@@ -337,7 +366,7 @@ async function walkTag(source: FileSource, start: number, reads: number): Promis
     position = body + size
     if (source.reads - reads > MAX_WALK_READS) return null
   }
-  return { bytes: standInTag(header, kept), end, frames: kept.length }
+  return { bytes: standInTag(header, kept), end: overran ? position : declared, frames: kept.length, overran }
 }
 
 async function frameSize(source: FileSource, frame: Uint8Array, major: number, position: number, end: number): Promise<number> {
@@ -356,9 +385,16 @@ async function frameAt(source: FileSource, position: number, end: number): Promi
   if (position === end) return true
   if (position > end) return false
   const bytes = await source.bytes(position, Math.min(10, end - position), HEAD)
-  if (bytes.every((byte) => byte === 0)) return true
-  if (bytes.length < 10 || !FRAME_ID.test(latin1(bytes, 0, 4))) return false
-  return position + 10 + (notSynchsafe(bytes, 4) ? uint32(bytes, 4) : synchsafe(bytes, 4)) <= end
+  return bytes.every((byte) => byte === 0) || frameFits(source, 4, position, end)
+}
+
+// Whether a frame header with a valid id, of a frame that ends by `end`, is at `position`.
+async function frameFits(source: FileSource, major: number, position: number, end: number): Promise<boolean> {
+  const headerSize = major === 2 ? 6 : 10
+  const bytes = await source.bytes(position, headerSize, HEAD)
+  if (bytes.length < headerSize || !(major === 2 ? FRAME_ID_V22 : FRAME_ID).test(latin1(bytes, 0, major === 2 ? 3 : 4))) return false
+  const size = major === 2 ? (bytes[3]! << 16) | (bytes[4]! << 8) | bytes[5]! : major === 4 && !notSynchsafe(bytes, 4) ? synchsafe(bytes, 4) : uint32(bytes, 4)
+  return position + headerSize + size <= end
 }
 
 // The same version and flags, minus the extended header and footer, and the kept frames with their
@@ -395,6 +431,77 @@ function putSynchsafe(bytes: Uint8Array, at: number, value: number) {
   bytes[at + 1] = (value >>> 14) & 0x7f
   bytes[at + 2] = (value >>> 7) & 0x7f
   bytes[at + 3] = value & 0x7f
+}
+
+// As music-metadata's own MPEG errors: a parse error, not a read error.
+class MpegContentError extends makeUnexpectedFileContentError('MPEG') {}
+
+// How far past the tags the audio is looked for, and how much that reads, room to confirm included.
+const AUDIO_SEARCH = 32 * 1024
+const AUDIO_READ = 48 * 1024
+// kbps by bitrate index 1–14: MPEG-1 layers I, II and III, then MPEG-2 and 2.5 layer I, then II and III.
+const BITRATES = [
+  [32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
+  [32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
+  [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+  [32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256],
+  [8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+]
+// By version bits: MPEG-2.5, reserved, MPEG-2, MPEG-1.
+const SAMPLE_RATES = [[11025, 12000, 8000], [], [22050, 24000, 16000], [44100, 48000, 32000]]
+
+// Where music-metadata should start on the audio, from `offset` just after the tags. It takes the
+// first bytes that look like a frame header, so junk there (frames a tag left out of its size, cover
+// art) can pass for audio: in issue #2 it took cover art for an ADTS frame of length 0 and failed.
+// So, as ffmpeg and TagLib do, the audio starts with a frame header confirmed by the next frame's.
+async function findAudio(source: FileSource, offset: number, overran: boolean): Promise<number> {
+  for (const length of [AUDIO_HEAD, AUDIO_READ]) {
+    const bytes = await source.bytes(offset, length, HEAD)
+    // After an intact tag, a frame header where it ends is the audio, as before.
+    if (!overran && frameLength(bytes, 0) > 0) return offset
+    for (let at = bytes.indexOf(0xff); at !== -1 && at < AUDIO_SEARCH; at = bytes.indexOf(0xff, at + 1)) {
+      if (framesAt(bytes, at)) return offset + at
+    }
+    if (bytes.length < length) break
+  }
+  // After an intact tag, music-metadata looks for the audio itself, as before.
+  if (!overran) return offset
+  throw new MpegContentError('No MPEG audio found after the ID3v2 tag')
+}
+
+// Whether the audio starts at `position`, after any padding.
+async function audioAt(source: FileSource, position: number): Promise<boolean> {
+  const bytes = await source.bytes(position, AUDIO_HEAD, HEAD)
+  let at = 0
+  while (bytes[at] === 0) at++
+  return framesAt(bytes, at)
+}
+
+// A frame header at `at`, and another of the same stream (version, layer, sample rate) where that
+// frame ends.
+function framesAt(bytes: Uint8Array, at: number): boolean {
+  const next = at + frameLength(bytes, at)
+  return next > at && frameLength(bytes, next) > 0 && (bytes[at + 1]! & 0xfe) === (bytes[next + 1]! & 0xfe) && (bytes[at + 2]! & 0x0c) === (bytes[next + 2]! & 0x0c)
+}
+
+// The length of the MPEG audio or ADTS frame whose header is at `at`, or 0 when there's none.
+function frameLength(bytes: Uint8Array, at: number): number {
+  if (at + 6 > bytes.length || bytes[at] !== 0xff || (bytes[at + 1]! & 0xe0) !== 0xe0) return 0
+  const b1 = bytes[at + 1]!
+  const b2 = bytes[at + 2]!
+  if ((b1 & 0x16) === 0x10) {
+    // ADTS (layer bits 00): the length is in the header, and includes it.
+    const length = ((bytes[at + 3]! & 0x03) << 11) | (bytes[at + 4]! << 3) | (bytes[at + 5]! >> 5)
+    return ((b2 >> 2) & 0x0f) <= 12 && length > ((b1 & 1) === 0 ? 9 : 7) ? length : 0
+  }
+  const version = (b1 >> 3) & 3
+  const layer = 4 - ((b1 >> 1) & 3)
+  const rate = SAMPLE_RATES[version]![(b2 >> 2) & 3]
+  const kbps = layer < 4 ? BITRATES[version === 3 ? layer - 1 : Math.min(layer + 2, 4)]![(b2 >> 4) - 1] : undefined
+  if (!rate || !kbps) return 0
+  // music-metadata's sums: samples per frame, and padding slots of 4 bytes in layer I.
+  const samples = layer === 1 ? 384 : layer === 3 && version !== 3 ? 576 : 1152
+  return Math.floor(((samples / 8) * kbps * 1000) / rate + ((b2 >> 1) & 1) * (layer === 1 ? 4 : 1))
 }
 
 const OGG_PAGE = 0x4f676753 // "OggS"
