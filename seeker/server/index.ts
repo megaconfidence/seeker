@@ -10,7 +10,7 @@ import { db } from './db.ts'
 import { checkFolders, describeIdentity } from './folders.ts'
 import { startEngine } from './jobs/engine.ts'
 import { rebuildOwnedIndex } from './library/owned.ts'
-import { startLibraryScanner } from './library/scan.ts'
+import { cancelLibraryScan, startLibraryScanner } from './library/scan.ts'
 import { logger } from './log.ts'
 import { handleMcp } from './mcp.ts'
 import { apiRoutes } from './routes.ts'
@@ -77,9 +77,16 @@ const server = serve({ fetch: app.fetch, port: config.port, hostname: '0.0.0.0' 
   log.info(`Running as ${describeIdentity()}`)
 })
 
-function shutdown() {
+let stopping = false
+
+async function shutdown() {
+  if (stopping) return
+  stopping = true
   log.info('Shutting down')
   server.close()
+  // A library scan saves what it has read, so the next start carries on from there. Docker allows
+  // 10 s after the stop signal.
+  await cancelLibraryScan(5_000).catch(() => null)
   try {
     db.close()
   } catch {
@@ -88,5 +95,5 @@ function shutdown() {
   process.exit(0)
 }
 
-process.on('SIGTERM', shutdown)
-process.on('SIGINT', shutdown)
+process.on('SIGTERM', () => void shutdown())
+process.on('SIGINT', () => void shutdown())
