@@ -183,8 +183,18 @@ reporting the last commit that built an image.
 - When `processJob()` throws with downloads left, `runProcessing()` makes the job wait (`retry`). Picking it straight
   up again repeated one failing database read 21,836 times in 3.5 s. A library index failure after filing is logged,
   not thrown: the files are in the music folder, and the library scan it schedules indexes them.
-- Library scans prepare album metadata before changing SQLite. Track upserts, removals and album rows commit in one
-  synchronous transaction; never hold a SQLite transaction across asynchronous filesystem work.
+- Library scans prepare album metadata before changing SQLite, and each commit is one synchronous transaction; never
+  hold a SQLite transaction across asynchronous filesystem work. A full scan saves what it reads in batches
+  (`BATCH_SIZE`, 200 tracks, or `SEEKER_SCAN_BATCH_MS`, 15 s), each with only its albums (the ones its tracks are on
+  now and were on before), through `serializeIndex()`, filtering `changedDuringScan` each time, with a `setImmediate`
+  between batches. Removals, the full album rebuild and `library_indexed = '1'` stay in the final commit, after the
+  guards. A failed or interrupted scan keeps its batches, and rows carry mtime and size, so the next scan reads only
+  what's left. The owned index is rebuilt at most every 15 s during batches: it reads every track.
+- A first scan sets `library_indexed` to `'0'` before its first batch and `'1'` in its final commit, so one that was
+  cut off (by a restart, say) is still the first scan when it resumes; `noteInitialLibrary()` runs once, when it
+  finishes, even with nothing left to read (it found tracks at the start). Databases from before the flag have tracks
+  and no flag, and aren't first scans. Later scans call `noteLibraryChange()` when they finish, never per batch: a
+  share rescan during a long scan would double the load on the share.
 - Scans are slow on network shares because of round trips, not bytes: a 5,000-track NFS library took hours one
   operation at a time. So listings and stats run 16 at a time and tag reads 12 (`eachLimit()`), with
   `UV_THREADPOOL_SIZE=16` in the image (file reads use libuv's pool, 4 threads by default). Albums take their cover
@@ -194,8 +204,8 @@ reporting the last commit that built an image.
   saving. `test/scan.test.ts` fails if a scan reads more than 256 kB from a FLAC with a 4 MB cover and a 48 MB MP3.
 - Embedded art isn't known after a scan: `lib_tracks.has_cover` is `COVER_UNCHECKED` (-1) until `albumCover()` in
   `serve.ts` checks a file, the first time the album is shown, and stores 1 or 0 (0 for the whole album).
-- A full scan lists and reads outside the index lock (`serializeIndex()`); only its commit waits, so post-import
-  indexing (`scanFiles()`) runs during a scan. Paths that imports or deletions change meanwhile go in
+- A full scan lists and reads outside the index lock (`serializeIndex()`); only its commits wait, so post-import
+  indexing (`scanFiles()`) runs during a scan, between batches. Paths that imports or deletions change meanwhile go in
   `changedDuringScan` (`indexedElsewhere()`), and the scan's commit leaves them alone: what it read for them is older.
   Folders in `SKIPPED_FOLDERS` (NAS metadata, recycle bins, snapshots) are never listed.
 - Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,
@@ -222,6 +232,8 @@ reporting the last commit that built an image.
   music folder, the mass-removal limit, `force`, and atomic index commits.
 - `test/scan.test.ts`: scan speed and its side effects: bytes read (counted through `FileHandle.read`), NAS folders,
   progress, one listing per folder, embedded covers checked on demand, and an import during a slowed-down full scan.
+- `test/scan-resume.test.ts`: batches saved while a slowed scan reads, and a first scan cut off before its final
+  commit. Reads are slowed per file by patching `FileHandle.read`, told apart by size.
 - `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
   folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.

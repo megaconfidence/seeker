@@ -17,6 +17,7 @@ type Sort = 'recent' | 'artist' | 'title' | 'year'
 function scanProgress(progress: ScanProgress): string | null {
   const files = (n: number) => `${n.toLocaleString()} ${n === 1 ? 'file' : 'files'}`
   if (progress.phase === 'listing') return `${files(progress.found)} found`
+  if (progress.phase === 'committing') return 'finishing up'
   return progress.toRead ? `${progress.read.toLocaleString()} of ${files(progress.toRead)} read` : null
 }
 
@@ -96,7 +97,8 @@ export function LibraryPage() {
   const scanning = status?.library.scanning || rescan.isPending
   const total = status?.library
   const scanned = total?.progress ? scanProgress(total.progress) : null
-  // A finished scan's counts arrive just before the album list refreshes.
+  const current = total?.progress?.current ?? null
+  // A scan's counts arrive just before the album list refreshes.
   const listBehind = albums.isSuccess && albums.data.length === 0 && !artist && !!total?.tracks
 
   return (
@@ -109,7 +111,15 @@ export function LibraryPage() {
               <X className="size-3.5" /> Show all artists
             </button>
           ) : total ? (
-            `${plural(total.albums, 'album')} · ${plural(total.tracks, 'track')}${total.progress ? ` · Scanning${scanned ? ` · ${scanned}` : ''}` : ''}`
+            <>
+              {`${plural(total.albums, 'album')} · ${plural(total.tracks, 'track')}${total.progress ? ` · Scanning${scanned ? ` · ${scanned}` : ''}` : ''}`}
+              {/* Takes the line's width without adding to it, so a long path never pushes the buttons around. */}
+              {current && (
+                <span className="block w-0 min-w-full truncate text-subtle" title={current}>
+                  {current}
+                </span>
+              )}
+            </>
           ) : undefined
         }
         actions={
@@ -178,7 +188,7 @@ export function LibraryPage() {
           <AlbumGridSkeleton />
         ) : shownAlbums.length === 0 && scanning && !filter ? (
           <Empty icon={<LibraryIcon className="size-6" />} title="Scanning your music folder">
-            {scanned ? `${scanned} so far. ` : ''}Albums show up here when the scan finishes.
+            {scanned ? `${scanned.charAt(0).toUpperCase()}${scanned.slice(1)}. ` : ''}Albums show up here as Seeker reads them.
           </Empty>
         ) : shownAlbums.length === 0 ? (
           <Empty icon={<LibraryIcon className="size-6" />} title={filter ? 'No matching albums' : 'Your library is empty'}>

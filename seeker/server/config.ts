@@ -52,5 +52,7 @@ export const config = {
     locateMs: num('SEEKER_LOCATE_MS', 30_000),
     // How long slskd may take to move a finished download into place (it copies across file systems).
     moveWaitMs: num('SEEKER_MOVE_WAIT_MS', 60 * 60_000),
+    // A full library scan saves what it has read at least this often, and every 200 tracks.
+    scanBatchMs: num('SEEKER_SCAN_BATCH_MS', 15_000),
   },
 }

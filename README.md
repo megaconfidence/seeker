@@ -220,10 +220,12 @@ An entirely empty music folder is guarded even for small libraries. Unreadable f
 tracks; a forced rescan never treats those access failures as deletions.
 
 Scans read only new and changed files, several at a time, and only their tags: a 5,000-track library on a network
-share takes seconds to a few minutes the first time, and the Library page shows how far it has got. Folders NAS systems
-keep next to your music (`@eaDir`, `#recycle`, `#snapshot` and the like) are skipped. Cover art embedded in the files
-isn't read during a scan; Seeker looks for it the first time an album without a cover image in its folder is shown.
-Music that finishes downloading during a scan is added straight away.
+share takes seconds to a few minutes the first time. The Library page shows how far a scan has got and the file it's
+on, and albums appear as the scan saves them, every 200 tracks or 15 seconds. If Seeker restarts during a scan, the
+next one continues where it left off. Folders NAS systems keep next to your music (`@eaDir`, `#recycle`, `#snapshot`
+and the like) are skipped. Cover art embedded in the files isn't read during a scan; Seeker looks for it the first time
+an album without a cover image in its folder is shown. Music that finishes downloading during a scan is added straight
+away.
 
 **Deletes are permanent.** Seeker has no recycle bin or undo for music files. Deleting a track or album removes its
 audio files, and upgrades permanently replace lower-quality copies after better files are filed. Back up your music
@@ -267,8 +269,8 @@ D.C. album", "what's stuck in my wishlist?", "find FLAC copies of the albums I o
 
 The assistant can read the app's state as well as change it:
 
-- `get_status`: the Soulseek connection, sharing, download counts, library size, the search budget, and the latest
-  warnings and errors.
+- `get_status`: the Soulseek connection, sharing, download counts, library size and how far a library scan has got,
+  the search budget, and the latest warnings and errors.
 - `list_downloads` and `get_download`: each download's percent, speed, time left, queue position, missing tracks and
   log.
 - `wait_for_download`: follows a download until it finishes.

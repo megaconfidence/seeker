@@ -385,14 +385,17 @@ export interface ScanResult {
   removed: number
 }
 
-// How far a library scan has got: first it lists the folders, then reads new and changed files.
+// How far a library scan has got: first it lists the folders, then reads new and changed files
+// (saving them in batches as it goes), then saves the rest and removes tracks whose files are gone.
 export interface ScanProgress {
-  phase: 'listing' | 'reading'
+  phase: 'listing' | 'reading' | 'committing'
   // Audio files found so far.
   found: number
   // New or changed files read so far, and how many there are to read (known once listing ends).
   read: number
   toRead: number
+  // The folder being listed or the file read most recently, relative to the music folder.
+  current: string | null
 }
 
 export interface LibraryStatus {

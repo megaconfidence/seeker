@@ -28,6 +28,11 @@ const SKIPPED_FOLDERS = new Set(['@eadir', '#recycle', '#snapshot', '@recycle', 
 // once. File reads use libuv's thread pool, which the image enlarges (UV_THREADPOOL_SIZE).
 const LIST_CONCURRENCY = 16
 const READ_CONCURRENCY = 12
+// A full scan saves what it has read every BATCH_SIZE tracks (or config.timing.scanBatchMs), so a
+// restart or a stopped scan keeps it, and albums show up while a long first scan runs.
+const BATCH_SIZE = 200
+// The owned index (owned.ts) is rebuilt from every track, so scan batches rebuild it at most this often.
+const OWNED_INDEX_MS = 15_000
 // lib_tracks.has_cover for embedded art nobody has looked for yet. Scans don't read covers;
 // albumCover() in serve.ts checks the first time an album is shown, and stores 1 or 0.
 export const COVER_UNCHECKED = -1
@@ -44,7 +49,10 @@ let retryTimer: ReturnType<typeof setTimeout> | undefined
 let indexWork = Promise.resolve()
 let progress: ScanProgress | null = null
 let progressEventAt = 0
-let progressLogAt = 0
+let progressLog: ReturnType<typeof setInterval> | undefined
+// For the progress log: bytes read during this scan, and where the files/s rate counts from.
+let bytesRead = 0
+let rateFrom = { at: 0, read: 0 }
 // Paths that imports and deletions changed while a full scan was reading files: what the scan read
 // for them is older, so it leaves them alone.
 let changedDuringScan: Set<string> | null = null
@@ -73,21 +81,33 @@ export function libraryStatus(): LibraryStatus {
 }
 
 const count = (n: number) => n.toLocaleString('en')
+const relative = (file: string) => path.relative(config.musicDir, file) || null
 
 function reportProgress(force = false) {
   if (!progress) return
   const now = Date.now()
-  if (now - progressLogAt >= PROGRESS_LOG_MS) {
-    progressLogAt = now
-    log.info(
-      progress.phase === 'listing'
-        ? `Library scan: ${count(progress.found)} files found so far`
-        : `Library scan: read ${count(progress.read)} of ${count(progress.toRead)} new or changed files`,
-    )
-  }
   if (force || now - progressEventAt >= PROGRESS_EVENT_MS) {
     progressEventAt = now
     announce()
+  }
+}
+
+// On a timer rather than per file, so a scan stuck on slow files still says where it is.
+function logProgress() {
+  if (!progress) return
+  const { phase, found, read, toRead, current } = progress
+  if (phase === 'listing') {
+    log.info(`Library scan: ${count(found)} files found so far${current ? `, listing ${current}` : ''}`)
+  } else if (phase === 'reading') {
+    const now = Date.now()
+    const rate = (read - rateFrom.read) / Math.max(1, (now - rateFrom.at) / 1000)
+    rateFrom = { at: now, read }
+    const megabytes = (bytesRead / 1024 / 1024).toFixed(1)
+    log.info(
+      `Library scan: read ${count(read)} of ${count(toRead)} new or changed files (${rate.toFixed(1)} files/s, ${megabytes} MB read)${current ? `, now ${current}` : ''}`,
+    )
+  } else {
+    log.info('Library scan: saving what it read')
   }
 }
 
@@ -152,7 +172,7 @@ const byPath = (a: { file: string } | { path: string }, b: { file: string } | { 
 // Lists the music folder, several folders and files at a time: on a network share each listing
 // and stat is a round trip. Folders that can't be read are collected rather than skipped, so their
 // tracks aren't taken as deleted. Only failing to read the music folder itself is an error.
-async function list(root: string, onFile: () => void): Promise<Listing> {
+async function list(root: string, onFolder: (dir: string) => void, onFile: () => void): Promise<Listing> {
   const listing: Listing = { files: [], unreadable: [], unreadableFiles: new Set(), covers: new Map() }
   type Task = { dir: string } | { file: string }
   await eachLimit<Task>([{ dir: root }], LIST_CONCURRENCY, async (task, add) => {
@@ -166,6 +186,7 @@ async function list(root: string, onFile: () => void): Promise<Listing> {
       }
       return
     }
+    onFolder(task.dir)
     let entries: Dirent[]
     try {
       entries = await fs.readdir(task.dir, { withFileTypes: true })
@@ -388,8 +409,24 @@ function writeAlbums(albums: AlbumRow[], albumIds?: Set<string>) {
   }
 }
 
-async function commitIndex(updates: TrackRow[], gone: string[], options: { albumIds?: Set<string>; markIndexed?: boolean; covers?: Map<string, string | null> } = {}) {
-  const { albumIds, markIndexed = false, covers } = options
+// The albums tracks are on now, and the ones their files were on before.
+function albumsOf(updates: TrackRow[], files: Iterable<string>): Set<string> {
+  const albumIds = new Set(updates.map((row) => row.album_id))
+  for (const file of files) {
+    const previous = get<{ album_id: string }>('SELECT album_id FROM lib_tracks WHERE path = ?', [file])
+    if (previous) albumIds.add(previous.album_id)
+  }
+  return albumIds
+}
+
+// `albumIds` limits the album rebuild to those albums. `owned: false` leaves the owned index for a
+// later commit to rebuild.
+async function commitIndex(
+  updates: TrackRow[],
+  gone: string[],
+  options: { albumIds?: Set<string>; markIndexed?: boolean; covers?: Map<string, string | null>; owned?: boolean } = {},
+) {
+  const { albumIds, markIndexed = false, covers, owned = true } = options
   const where = albumIds ? `WHERE album_id IN (${[...albumIds].map(() => '?').join(',')})` : ''
   const current = all<AlbumTrack>(`SELECT * FROM lib_tracks ${where}`, albumIds ? [...albumIds] : [])
   const projected = new Map(current.map((row) => [row.path, row]))
@@ -404,7 +441,7 @@ async function commitIndex(updates: TrackRow[], gone: string[], options: { album
     writeAlbums(albums, albumIds)
     if (markIndexed) setMeta('library_indexed', '1')
   })
-  rebuildOwnedIndex()
+  if (owned) rebuildOwnedIndex()
 }
 
 const result = (outcome: ScanResult['outcome'], message: string, counts: Partial<ScanResult> = {}): ScanResult => ({
@@ -456,15 +493,77 @@ function refuse(message: string, missing: number, canForce: boolean, retry: bool
 }
 
 async function scan(force: boolean): Promise<ScanResult> {
-  progress = { phase: 'listing', found: 0, read: 0, toRead: 0 }
-  progressLogAt = Date.now()
+  progress = { phase: 'listing', found: 0, read: 0, toRead: 0, current: null }
+  bytesRead = 0
   changedDuringScan = new Set()
+  progressLog = setInterval(logProgress, PROGRESS_LOG_MS)
+  progressLog.unref()
   reportProgress(true)
   try {
     return await scanFolder(force)
   } finally {
+    clearInterval(progressLog)
     progress = null
     changedDuringScan = null
+  }
+}
+
+// Lets requests waiting on the server run between batches of synchronous database work.
+const breathe = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+// One batch of a full scan, with the albums its tracks are on now and were on before. Paths an
+// import or deletion changed meanwhile are left alone.
+function saveBatch(rows: TrackRow[], covers: Map<string, string | null>, owned = true): Promise<void> {
+  return serializeIndex(async () => {
+    const fresh = rows.filter((row) => !changedDuringScan?.has(row.path)).sort(byPath)
+    if (fresh.length) await commitIndex(fresh, [], { albumIds: albumsOf(fresh, fresh.map((row) => row.path)), covers, owned })
+  })
+}
+
+// What a full scan has read, saved every BATCH_SIZE tracks or config.timing.scanBatchMs, one batch
+// after another while the scan goes on reading. `onSaved` runs after each batch.
+function batches(covers: Map<string, string | null>, onSaved: () => void) {
+  let rows: TrackRow[] = []
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let saving = Promise.resolve()
+  let failure: { error: unknown } | null = null
+  let ownedAt = 0
+  const save = () => {
+    clearTimeout(timer)
+    timer = undefined
+    const batch = rows
+    rows = []
+    if (!batch.length) return
+    saving = saving.then(async () => {
+      if (failure) return
+      try {
+        const owned = Date.now() - ownedAt >= OWNED_INDEX_MS
+        if (owned) ownedAt = Date.now()
+        await saveBatch(batch, covers, owned)
+        onSaved()
+      } catch (error) {
+        failure = { error }
+      }
+      await breathe()
+    })
+  }
+  return {
+    failed: () => failure !== null,
+    add(row: TrackRow) {
+      rows.push(row)
+      if (rows.length >= BATCH_SIZE) save()
+      else if (rows.length === 1) timer = setTimeout(save, config.timing.scanBatchMs)
+    },
+    // Waits for the batches being saved, and returns the rows not saved yet. Throws if a batch failed.
+    async finish(): Promise<TrackRow[]> {
+      clearTimeout(timer)
+      timer = undefined
+      await saving
+      if (failure) throw failure.error
+      const rest = rows
+      rows = []
+      return rest
+    },
   }
 }
 
@@ -475,15 +574,23 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
   const known = new Map(
     all<{ path: string; mtime: number; size: number }>('SELECT path, mtime, size FROM lib_tracks').map((row) => [row.path, row]),
   )
-  const firstScan = known.size === 0 && getMeta('library_indexed') !== '1'
+  // A first scan is marked '0' before it saves anything and '1' once it finishes, so one cut off
+  // part way is still the first scan when it resumes. Databases from before the mark have tracks
+  // and no mark.
+  const indexed = getMeta('library_indexed')
+  const firstScan = indexed === '0' || (indexed === undefined && known.size === 0)
+  const onFolder = (folder: string) => {
+    progress!.current = relative(folder)
+  }
+  const onFile = () => {
+    progress!.found++
+    reportProgress()
+  }
   let listing: Listing
   try {
     // Never created here: creating it would hide a share that isn't mounted.
     if (!(await fs.stat(dir)).isDirectory()) throw Object.assign(new Error(`${dir} isn’t a folder`), { code: 'ENOTDIR' })
-    listing = await list(dir, () => {
-      progress!.found++
-      reportProgress()
-    })
+    listing = await list(dir, onFolder, onFile)
   } catch (error) {
     return refuse(`Seeker can’t read the music folder, ${dir} (${fsReason(error)}). ${unmountedHint}`, known.size, false, true)
   }
@@ -512,28 +619,54 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
     const existing = known.get(entry.file)
     return !existing || existing.mtime !== entry.mtime || existing.size !== entry.size
   })
-  progress = { phase: 'reading', found: files.length, read: 0, toRead: toRead.length }
+  // The folder is there and the guards passed, so an earlier refusal no longer holds, and a long
+  // scan shouldn't show it while albums appear.
+  problem = null
+  progress = { phase: 'reading', found: files.length, read: 0, toRead: toRead.length, current: null }
+  rateFrom = { at: Date.now(), read: 0 }
   reportProgress(true)
-  const updates: TrackRow[] = []
-  await eachLimit(toRead, READ_CONCURRENCY, async (entry) => {
-    try {
-      updates.push(await readTrack(entry.file, entry.mtime, entry.size))
-    } catch (error) {
+  if (firstScan && indexed !== '0') setMeta('library_indexed', '0')
+
+  let updated = 0
+  const saved = batches(covers, announce)
+  const onBytes = (bytes: number) => {
+    bytesRead += bytes
+  }
+  const read = async (entry: Entry) => {
+    if (saved.failed()) return
+    progress!.current = relative(entry.file)
+    const row = await readTrack(entry.file, entry.mtime, entry.size, { onBytes }).catch((error: unknown) => {
       log.warn(`Could not read ${entry.file}`, error)
+      return null
+    })
+    if (row) {
+      saved.add(row)
+      updated++
     }
     progress!.read++
     reportProgress()
-  })
-  updates.sort(byPath)
+  }
+  try {
+    await eachLimit(toRead, READ_CONCURRENCY, read)
+  } catch (error) {
+    // No batch is saved once the scan is over.
+    await saved.finish().catch(() => {})
+    throw error
+  }
+  const rest = (await saved.finish()).sort(byPath)
+
+  progress = { ...progress!, phase: 'committing', current: null }
+  reportProgress(true)
   await serializeIndex(() => {
     // An import or deletion that changed a path while this scan read files knows better.
     const current = (file: string) => !changedDuringScan!.has(file)
-    return commitIndex(updates.filter((row) => current(row.path)), gone.filter(current), { markIndexed: true, covers })
+    return commitIndex(rest.filter((row) => current(row.path)), gone.filter(current), { markIndexed: true, covers })
   })
-  const updated = updates.length
-  if (updated || gone.length) {
-    if (firstScan) noteInitialLibrary()
-    else noteLibraryChange()
+  if (firstScan) {
+    // Tracks known at the start were saved by this first scan before it was cut off.
+    if (updated || gone.length || known.size) noteInitialLibrary()
+  } else if (updated || gone.length) {
+    noteLibraryChange()
   }
   if (unreadable.length || unreadableFiles.size) {
     const paths = [...unreadable, ...unreadableFiles]
@@ -574,12 +707,7 @@ export async function scanFiles(files: string[]): Promise<void> {
 }
 
 async function indexFiles(files: string[], updates: TrackRow[]): Promise<void> {
-  // The albums the files belong to now, and the ones they belonged to before.
-  const albumIds = new Set(updates.map((row) => row.album_id))
-  for (const file of files) {
-    const previous = get<{ album_id: string }>('SELECT album_id FROM lib_tracks WHERE path = ?', [file])
-    if (previous) albumIds.add(previous.album_id)
-  }
+  const albumIds = albumsOf(updates, files)
   if (albumIds.size) await commitIndex(updates, [], { albumIds })
   if (problem?.message.startsWith('Indexing imported files failed:')) problem = null
   if (updates.length) noteLibraryChange()

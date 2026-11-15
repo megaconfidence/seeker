@@ -760,7 +760,7 @@ function buildServer(): McpServer {
     {
       title: 'Rescan the library',
       description:
-        'Re-read the music folder, e.g. after changing files outside Seeker. If the folder is missing, unreadable or empty, or more than half the library seems gone, Seeker keeps the library as it is and says why: an unmounted network share looks like that. get_status shows that as library.problem.',
+        'Re-read the music folder, e.g. after changing files outside Seeker, and wait for the scan to finish. If the folder is missing, unreadable or empty, or more than half the library seems gone, Seeker keeps the library as it is and says why: an unmounted network share looks like that. get_status shows that as library.problem, and how far a running scan has got as library.progress. Scans save what they read as they go.',
       inputSchema: {
         force: z
           .boolean()
@@ -883,7 +883,7 @@ function buildServer(): McpServer {
     {
       title: 'Seeker status',
       description:
-        'Soulseek connection and sharing, download counts, library size and how far a running library scan has got (library.progress), the search budget, where files live and whether Seeker can write there, and the latest server warnings and errors (the first place to look when something isn’t working).',
+        'Soulseek connection and sharing, download counts, library size and how far a running library scan has got (library.progress: its phase, files found and read, and the folder or file it’s on), the search budget, where files live and whether Seeker can write there, and the latest server warnings and errors (the first place to look when something isn’t working).',
       inputSchema: {},
       annotations: local,
     },

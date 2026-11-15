@@ -5,13 +5,31 @@ import { ACTIVE_STATUSES } from '../../../shared/types.ts'
 import { api } from './api.ts'
 
 let libraryTimer: ReturnType<typeof setTimeout> | undefined
+let scanTimer: ReturnType<typeof setTimeout> | undefined
+let scanRefreshedAt = 0
 
 function refreshLibraryViews(client: QueryClient) {
   clearTimeout(libraryTimer)
+  clearTimeout(scanTimer)
+  scanTimer = undefined
   libraryTimer = setTimeout(() => {
     void client.invalidateQueries({ queryKey: ['library'] })
     void client.invalidateQueries({ queryKey: ['catalog'] })
   }, 800)
+}
+
+// A running scan saves what it reads in batches, so albums show up as it goes: soon after the
+// first batch, then at most every few seconds rather than once per batch.
+function refreshDuringScan(client: QueryClient) {
+  if (scanTimer) return
+  scanTimer = setTimeout(
+    () => {
+      scanTimer = undefined
+      scanRefreshedAt = Date.now()
+      void client.invalidateQueries({ queryKey: ['library'] })
+    },
+    Math.max(800, scanRefreshedAt + 3000 - Date.now()),
+  )
 }
 
 function applyJob(client: QueryClient, job: Job) {
@@ -54,7 +72,8 @@ export function useServerEvents(enabled: boolean) {
         case 'status':
           client.setQueryData(['status'], event.status)
           break
-        case 'library':
+        case 'library': {
+          const before = client.getQueryData<AppStatus>(['status'])?.library
           client.setQueryData<AppStatus>(['status'], (status) =>
             status
               ? {
@@ -64,7 +83,9 @@ export function useServerEvents(enabled: boolean) {
               : status,
           )
           if (!event.scanning) refreshLibraryViews(client)
+          else if (before && (before.albums !== event.albums || before.tracks !== event.tracks)) refreshDuringScan(client)
           break
+        }
         case 'watchlist':
           void client.invalidateQueries({ queryKey: ['watchlist'] })
           break
