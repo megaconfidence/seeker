@@ -9,11 +9,12 @@ import { promisify } from 'node:util'
 import { parseFile } from 'music-metadata'
 import { FakeSlskd } from './fakes/slskd.ts'
 
+const run = promisify(execFile)
 const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'seeker-processing-')))
 const dirs = { data: path.join(root, 'data'), downloads: path.join(root, 'downloads'), music: path.join(root, 'music'), import: path.join(root, 'import') }
 await Promise.all(Object.values(dirs).map((dir) => fs.mkdir(dir)))
 const fixture = path.join(root, 'song.mp3')
-await promisify(execFile)('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anoisesrc=d=1:seed=7', '-b:a', '128k', '-metadata', 'artist=Test Artist', '-metadata', 'album=Waiting Album', '-metadata', 'title=Song', fixture])
+await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anoisesrc=d=1:seed=7', '-b:a', '128k', '-metadata', 'artist=Test Artist', '-metadata', 'album=Waiting Album', '-metadata', 'title=Song', fixture])
 const fake = await new FakeSlskd({ apiKey: 'seeker-test-key', downloadsDir: dirs.downloads }).start()
 Object.assign(process.env, {
   SEEKER_DATA_DIR: dirs.data, SEEKER_DOWNLOADS_DIR: dirs.downloads, SEEKER_MUSIC_DIR: dirs.music, SEEKER_IMPORT_DIR: dirs.import,
@@ -142,6 +143,42 @@ for (const empty of [false, true]) {
     await resume(job.id)
   })
 }
+
+// Files jobs are filed by their tags: Test Artist/Waiting Album <title>/00 - Song.mp3.
+async function readOnlyAlbumWith(title: string, copy: (destination: string) => Promise<unknown>) {
+  const album = path.join(dirs.music, 'Test Artist', `Waiting Album ${title}`)
+  await fs.mkdir(album, { recursive: true })
+  await copy(path.join(album, '00 - Song.mp3'))
+  await fs.chmod(album, 0o555)
+  return album
+}
+
+test('a read-only album folder doesn’t hold up a track that’s already there in the same quality', { skip: asRoot }, async () => {
+  const { job } = await downloaded('Owned')
+  const album = await readOnlyAlbumWith('Owned', (destination) => fs.copyFile(fixture, destination))
+  try {
+    engine.retryJob(job.id)
+    await waitFor(() => store.getJob(job.id)?.status === 'completed')
+    assert.deepEqual(store.jobFiles(job.id).map((file) => [file.state, file.error]), [['skipped', 'already in your library']])
+  } finally {
+    await fs.chmod(album, 0o755)
+  }
+})
+
+test('a read-only album folder still holds up a track that would replace a worse copy', { skip: asRoot }, async () => {
+  const { job } = await downloaded('Worse copy')
+  const album = await readOnlyAlbumWith('Worse copy', (destination) =>
+    run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', fixture, '-b:a', '64k', destination]),
+  )
+  try {
+    await waiting(job.id)
+    assert.match(store.getJob(job.id)!.error ?? '', /permission denied/)
+  } finally {
+    await fs.chmod(album, 0o755)
+  }
+  await resume(job.id)
+  assert.equal(store.jobFiles(job.id)[0]!.state, 'imported', 'the better copy replaced the worse one')
+})
 
 test('a read-only album destination preserves downloaded files', { skip: asRoot }, async () => {
   const { job, files } = await downloaded('Locked album')

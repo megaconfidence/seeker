@@ -399,18 +399,21 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
           : await destinationFromTags(working, row, settings.naming.template, ext)
 
       onMusic = true
-      await checkDestination(destination)
       const existing = await existingVariant(destination)
       const sameFile = existing && path.resolve(existing) === path.resolve(local)
       if (existing && !sameFile) {
-        const current = await probe(existing).catch(() => null)
-        if (current && qualityRank(info) <= qualityRank(current) + 10) {
-          if (!isImport || copyMode) await fs.rm(working, { force: true })
+        const owned = await probe(existing).catch(() => null)
+        if (owned && qualityRank(info) <= qualityRank(owned) + 10) {
+          // A leftover copy is harmless: the job's download folder and temporary copies go when it ends.
+          if (!isImport || copyMode) await fs.rm(working, { force: true }).catch(() => {})
           store.patchFile(row.id, { state: 'skipped', local_path: existing, error: 'already in your library' })
           store.logJob(jobId, 'info', `${name} is already in your library in the same or better quality`)
           continue
         }
       }
+      // Only now that something will be written: a read-only album folder doesn't hold up a track
+      // that's already there.
+      await checkDestination(destination)
 
       let filed = working
       let note: string | null = null
