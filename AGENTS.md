@@ -69,8 +69,10 @@ the running Seeker container with the new image on its next check. Pushes that o
 `docker-compose.yml` skip the workflow (`paths-ignore`): they publish and deploy nothing, and the server keeps
 reporting the last commit that built an image.
 
-- **A push to `main` is a production deploy.** Don't push work in progress there; use a branch and a pull request
-  (pull requests are tested and built, never published). Only push or tag when the owner asks.
+- **A push to `main` is a production deploy, and the owner wants every finished change pushed without being asked.**
+  Once `npm run typecheck` and `npm test` pass and the work is committed, push it to `main` and check that the
+  workflow published the image. Never push work in progress; that's what branches and pull requests are for (pull
+  requests are tested and built, never published). Only tag a release when the owner asks.
 - Version tags `v*` publish `X.Y.Z` and `X.Y`. Bump `version` in `seeker/package.json` and `server/config.ts`
   together.
 - Images carry their commit (`SEEKER_COMMIT` build argument). Settings → Account and MCP `get_status` show it, which
