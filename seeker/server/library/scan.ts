@@ -81,7 +81,7 @@ interface Entry {
 
 // Folders that can't be read are collected rather than skipped, so their tracks aren't taken as
 // deleted. Only failing to read the music folder itself is an error.
-async function walk(dir: string, out: Entry[], unreadable: string[], root = false) {
+async function walk(dir: string, out: Entry[], unreadable: string[], unreadableFiles: Set<string>, root = false) {
   let entries: import('node:fs').Dirent[]
   try {
     entries = await fs.readdir(dir, { withFileTypes: true })
@@ -95,13 +95,13 @@ async function walk(dir: string, out: Entry[], unreadable: string[], root = fals
     if (entry.name.startsWith('.')) continue
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      await walk(full, out, unreadable)
+      await walk(full, out, unreadable, unreadableFiles)
     } else if (entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
       try {
         const stat = await fs.stat(full)
         out.push({ file: full, mtime: Math.floor(stat.mtimeMs), size: stat.size })
-      } catch {
-        // vanished between readdir and stat
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') unreadableFiles.add(full)
       }
     }
   }
@@ -363,22 +363,26 @@ async function scan(force: boolean): Promise<ScanResult> {
   )
   const files: Entry[] = []
   const unreadable: string[] = []
+  const unreadableFiles = new Set<string>()
   try {
     // Never created here: creating it would hide a share that isn't mounted.
     if (!(await fs.stat(dir)).isDirectory()) throw Object.assign(new Error(`${dir} isn’t a folder`), { code: 'ENOTDIR' })
-    await walk(dir, files, unreadable, true)
+    await walk(dir, files, unreadable, unreadableFiles, true)
   } catch (error) {
     return refuse(`Seeker can’t read the music folder, ${dir} (${fsReason(error)}). ${unmountedHint}`, known.size, false, true)
   }
-  if (files.length === 0 && known.size > 0 && !force) {
-    return refuse(`The music folder, ${dir}, is empty, but the library has ${tracks(known.size)}. ${unmountedHint}`, known.size, true, true)
+  if (files.length === 0 && known.size > 0) {
+    if (unreadable.length || unreadableFiles.size) {
+      const paths = [...unreadable, ...unreadableFiles].slice(0, 3).join(', ')
+      return refuse(`Seeker couldn’t read folders or files in the music folder, ${dir}: ${paths}. Check the mount and permissions.`, known.size, false, true)
+    }
+    if (!force) return refuse(`The music folder, ${dir}, is empty, but the library has ${tracks(known.size)}. ${unmountedHint}`, known.size, true, true)
   }
 
   const seen = new Set(files.map((entry) => entry.file))
   const inUnreadable = (file: string) => unreadable.some((folder) => file.startsWith(folder + path.sep))
-  const gone = [...known.keys()].filter((file) => !seen.has(file) && !inUnreadable(file))
-  const limit = Math.max(100, Math.floor(known.size / 2))
-  if (gone.length > limit && !force) {
+  const gone = [...known.keys()].filter((file) => !seen.has(file) && !inUnreadable(file) && !unreadableFiles.has(file))
+  if (!force && gone.length >= 100 && gone.length > known.size / 2) {
     return refuse(
       `${gone.length.toLocaleString('en')} of the library’s ${tracks(known.size)} are missing from the music folder, ${dir}. That’s more than Seeker removes without asking, in case the folder isn’t all there.`,
       gone.length,
@@ -405,9 +409,10 @@ async function scan(force: boolean): Promise<ScanResult> {
   await rebuildAlbums()
   rebuildOwnedIndex()
   if (updated || gone.length) noteLibraryChange()
-  if (unreadable.length) {
-    const shown = unreadable.slice(0, 3).join(', ') + (unreadable.length > 3 ? ', …' : '')
-    log.warn(`Seeker couldn’t read ${unreadable.length} ${unreadable.length === 1 ? 'folder' : 'folders'} in the music folder, so it kept their tracks: ${shown}. Check their permissions.`)
+  if (unreadable.length || unreadableFiles.size) {
+    const paths = [...unreadable, ...unreadableFiles]
+    const shown = paths.slice(0, 3).join(', ') + (paths.length > 3 ? ', …' : '')
+    log.warn(`Seeker couldn’t read ${paths.length} folders or files in the music folder, so it kept their tracks: ${shown}. Check the mount and permissions.`)
   }
   problem = null
   const message = `Library scan: ${files.length} files, ${updated} updated, ${gone.length} removed${force ? ' (forced)' : ''} in ${Date.now() - started} ms`

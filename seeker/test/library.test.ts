@@ -40,6 +40,7 @@ Object.assign(process.env, {
 const { updateSettings } = await import('../server/settings.ts')
 const { scanLibrary, libraryStatus, musicFolderProblem } = await import('../server/library/scan.ts')
 const { get } = await import('../server/db.ts')
+const { recentProblems } = await import('../server/log.ts')
 updateSettings({ shares: { autoRescan: false } })
 
 after(() => slskd.close())
@@ -124,6 +125,61 @@ test('an unreadable album folder keeps its tracks while the rest is scanned', { 
   } finally {
     await fs.chmod(albumDir(8), 0o755)
   }
+})
+
+test('an entirely unreadable tree is not empty and cannot be forced away', { skip: asRoot }, async () => {
+  for (let album = 1; album <= 8; album++) await fs.chmod(albumDir(album), 0o000)
+  try {
+    for (const force of [false, true]) {
+      const result = await scanLibrary({ force })
+      assert.equal(result.outcome, 'refused')
+      assert.match(result.message, /couldn’t read folders or files/)
+      assert.equal(libraryStatus().problem?.canForce, false)
+      assert.equal(indexed(), 200)
+    }
+  } finally {
+    for (let album = 1; album <= 8; album++) await fs.chmod(albumDir(album), 0o755)
+  }
+  assert.equal((await scanLibrary()).outcome, 'done')
+})
+
+for (const code of ['EACCES', 'EIO', 'ESTALE']) {
+  test(`file-level stat ${code} keeps the indexed track until access returns`, async (t) => {
+    const file = path.join(albumDir(8), '01 - Track 1.mp3')
+    const original = fs.stat.bind(fs)
+    const stat = t.mock.method(fs, 'stat', (async (...args: Parameters<typeof fs.stat>) => {
+      if (args[0] === file) throw Object.assign(new Error(code), { code })
+      return original(...args)
+    }) as typeof fs.stat)
+    try {
+      const scan = await scanLibrary()
+      assert.equal(scan.removed, 0)
+      assert.equal(indexed(), 200)
+      assert.ok(get('SELECT path FROM lib_tracks WHERE path = ?', [file]))
+      assert.ok(recentProblems().some((problem) => problem.message.includes(file)), 'the unreadable path must be logged')
+    } finally {
+      stat.mock.restore()
+    }
+    await fs.utimes(file, new Date(), new Date(Date.now() + 1000))
+    const scan = await scanLibrary()
+    assert.equal(scan.updated, 1)
+    assert.equal(scan.removed, 0)
+  })
+}
+
+test('an unreadable audio file remains indexed when metadata reading fails', { skip: asRoot }, async () => {
+  const file = path.join(albumDir(8), '02 - Track 2.mp3')
+  await fs.utimes(file, new Date(), new Date(Date.now() + 2000))
+  await fs.chmod(file, 0o000)
+  try {
+    // chmod prevents reading the file, but generally does not prevent stat.
+    const scan = await scanLibrary()
+    assert.equal(scan.removed, 0)
+    assert.equal(indexed(), 200)
+  } finally {
+    await fs.chmod(file, 0o644)
+  }
+  assert.equal((await scanLibrary()).updated, 1)
 })
 
 test('deleting one album removes just that album', async () => {

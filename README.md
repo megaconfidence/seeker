@@ -201,8 +201,11 @@ MusicBrainz from the bottom of the results.
 **Library.** Open an album in your library to play it. The **⋯** menu can find a better-quality copy, match the album
 to the catalog (fixing its tags, file names and cover), or delete it. Seeker rescans the music folder at startup and
 every 6 hours, and when you press **Rescan**. If the folder is missing, unreadable or empty, or more than half the
-library seems gone, it leaves the library as it is and explains why at the top of the Library page: a network share
+library seems gone (at least 100 tracks), it leaves the library as it is and explains why at the top of the Library page: a network share
 that isn't mounted looks just like that. If you did remove the music, press **Remove missing tracks**.
+
+An entirely empty music folder is guarded even for small libraries. Unreadable files and folders keep their indexed
+tracks; a forced rescan never treats those access failures as deletions.
 
 **Importing.** Put album folders in the import folder (`/import`) and open **Library → Import music**. For each folder,
 Seeker suggests matching albums and shows how many files fit. Choose one to tag the files and file them in your
