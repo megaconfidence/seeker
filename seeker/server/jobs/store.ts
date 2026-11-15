@@ -15,11 +15,13 @@ import { all, exec, get } from '../db.ts'
 import { emit } from '../events.ts'
 
 // Downloads that can't be filed yet are kept, and the job waits in `processing` until next_retry_at.
-export type WaitReason = 'music' | 'space'
+// `retry`: processing failed for another reason, and trying straight away would only fail again.
+export type WaitReason = 'music' | 'space' | 'retry'
 
 export const WAIT_PHASES: Record<WaitReason, string> = {
   music: 'Waiting for the music folder',
   space: 'Waiting for free space',
+  retry: 'Waiting to try again',
 }
 
 export interface JobRow {

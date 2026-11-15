@@ -336,7 +336,8 @@ and download files Seeker can access; check their permissions before switching.
   downloads folder, or Seeker's data folder, where it makes temporary copies). Seeker keeps the downloaded files and
   any tracks already filed, then retries every 10 minutes. Fix the mount or permissions, or free some space, and press
   **Try again** in Downloads to resume immediately, without downloading again. Cancelling the job explicitly removes
-  its downloaded files.
+  its downloaded files. "Waiting to try again" works the same way when filing failed for another reason; the
+  download's details say why.
 - **The library stopped updating**: Seeker can't see your music, usually because a network share isn't mounted, so
   it keeps the index. It looks again every 10 minutes, or press **Rescan** on the Library page.
 - **AcoustID says the key is invalid**: use an application key, not your user key.

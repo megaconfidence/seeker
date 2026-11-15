@@ -795,7 +795,8 @@ let processingTimer: ReturnType<typeof setTimeout> | undefined
 const PROCESSING_RETRY_MS = 10 * 60_000
 
 function kickProcessing() {
-  void runProcessing()
+  // Only if recording an error fails too; an unhandled rejection would stop Seeker.
+  void runProcessing().catch((error) => log.error('Processing stopped', error))
 }
 
 // The downloads stay where they are; processing tries again later, or when the user presses Try again.
@@ -818,6 +819,13 @@ async function runProcessing() {
       } catch (error) {
         log.error(`Processing ${job.id} failed`, error)
         store.logJob(job.id, 'error', `Post-processing failed: ${errorMessage(error)}`)
+        // Picking the job straight up again would repeat the same error thousands of times a second,
+        // so the downloads that are left wait for the next try instead.
+        if (stillActive(job.id) && store.jobFiles(job.id).some((row) => row.state === 'downloaded')) {
+          store.patchJob(job.id, { error: `Processing failed: ${errorMessage(error)}` })
+          waitToProcess(job.id, 'retry')
+          continue
+        }
       }
       if (!stillActive(job.id)) continue
       if (waitingFor) {

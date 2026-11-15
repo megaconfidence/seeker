@@ -169,6 +169,9 @@ reporting the last commit that built an image.
   temporary copies in the data folder). `next_retry_at` persists the ten-minute processing retry and `waiting_for`
   why; `retryJob()` resumes those files directly. Never settle or clean up a waiting job: settling deletes the
   downloads. A download that vanished (`ENOENT` with the source gone) is a failed file, not a wait.
+- When `processJob()` throws with downloads left, `runProcessing()` makes the job wait (`retry`). Picking it straight
+  up again repeated one failing database read 21,836 times in 3.5 s. A library index failure after filing is logged,
+  not thrown: the files are in the music folder, and the library scan it schedules indexes them.
 - Library scans prepare album metadata before changing SQLite. Track upserts, removals and album rows commit in one
   synchronous transaction; never hold a SQLite transaction across asynchronous filesystem work.
 - Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,

@@ -266,12 +266,12 @@ const MUSIC_UNAVAILABLE = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE
 const NO_SPACE = new Set(['ENOSPC', 'EDQUOT'])
 const errorCode = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code ?? ''
 
-const WAIT_HINTS: Record<WaitReason, string> = {
+const WAIT_HINTS: Record<Exclude<WaitReason, 'retry'>, string> = {
   music: 'retry once the folder is back',
   space: 'retry once there’s free space',
 }
 
-function waitFor(jobId: string, reason: WaitReason, message: string) {
+function waitFor(jobId: string, reason: Exclude<WaitReason, 'retry'>, message: string) {
   if (store.getJob(jobId)?.error !== message) store.logJob(jobId, 'warn', `${message} Downloads are kept; ${WAIT_HINTS[reason]}.`)
   store.patchJob(jobId, { error: message })
   store.setPhase(jobId, WAIT_PHASES[reason])
@@ -498,10 +498,17 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
       if (!(await exists(coverPath))) await fs.writeFile(coverPath, cover).catch(() => {})
     }
     store.setPhase(jobId, 'Adding to library')
-    if (touchedLibrary) await scanLibrary()
-    else await scanFiles(imported)
+    const count = `${imported.length} ${imported.length === 1 ? 'track' : 'tracks'}`
+    try {
+      if (touchedLibrary) await scanLibrary()
+      else await scanFiles(imported)
+      store.logJob(jobId, 'info', `Added ${count} to your library`)
+    } catch (error) {
+      // The files are in the music folder already and a library scan picks them up, so this isn't a
+      // processing failure (which would make the job run again for nothing).
+      store.logJob(jobId, 'warn', `Filed ${count}, but couldn’t add them to the library index (${errorMessage(error)}). The next library scan adds them.`)
+    }
     scheduleJellyfinRefresh()
-    store.logJob(jobId, 'info', `Added ${imported.length} ${imported.length === 1 ? 'track' : 'tracks'} to your library`)
   }
   if (waitingFor) store.setPhase(jobId, WAIT_PHASES[waitingFor])
   return { failedTracks, waitingFor }

@@ -433,7 +433,8 @@ export async function scanFiles(files: string[]): Promise<void> {
     try {
       await indexFiles(files)
     } catch (error) {
-      refuse(`Indexing imported files failed: ${errorMessage(error)}.`, 0, false, false)
+      // The files are on disk, so a library scan in a few minutes indexes them.
+      refuse(`Indexing imported files failed: ${errorMessage(error)}.`, 0, false, true)
       throw error
     } finally {
       announce()
