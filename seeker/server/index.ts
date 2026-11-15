@@ -60,7 +60,7 @@ if (fs.existsSync(indexHtml)) {
   app.get('/', (c) => c.text('The web UI is not built. Run `npm run build`, or use the Vite dev server.'))
 }
 
-checkFolders()
+void checkFolders()
 announcePassword()
 removeCliToken()
 rebuildOwnedIndex()

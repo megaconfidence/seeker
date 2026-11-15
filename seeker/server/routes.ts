@@ -143,14 +143,14 @@ export function apiRoutes() {
   })
   api.post('/slskd/rescan', async (c) => c.json(await rescanSharesNow()))
 
-  api.get('/info', (c) =>
+  api.get('/info', async (c) =>
     c.json({
       version: config.version,
       commit: config.commit || null,
       musicDir: config.musicDir,
       downloadsDir: config.downloadsDir,
       importDir: config.importDir,
-      folderProblems: folderProblems(),
+      folderProblems: await folderProblems(),
       slskdUrl: config.slskdUrl,
       acoustidFromEnv: !!config.acoustidKey,
       searchBudget: searchBudget(),

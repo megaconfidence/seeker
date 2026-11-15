@@ -2,7 +2,7 @@
 // errors, and a startup that stops with the fix when the data folder isn't writable.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { rmSync } from 'node:fs'
+import fsSync, { rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -101,21 +101,29 @@ test('the data folder message names the folder, the ids on both sides and the fi
 })
 
 test('folder problems: missing, not a folder, not writable', { skip: asRoot }, async () => {
-  assert.equal(folders.folderProblem(dirs.music), null)
-  assert.equal(folders.folderProblem(path.join(root, 'nowhere')), 'it doesn’t exist')
+  assert.equal(await folders.folderProblem(dirs.music), null)
+  assert.equal(await folders.folderProblem(path.join(root, 'nowhere')), 'it doesn’t exist')
   const file = path.join(root, 'a-file')
   await fs.writeFile(file, '')
-  assert.equal(folders.folderProblem(file), 'it isn’t a folder')
-  assert.equal(folders.folderProblem(await readOnlyFolder('locked')), 'permission denied')
+  assert.equal(await folders.folderProblem(file), 'it isn’t a folder')
+  assert.equal(await folders.folderProblem(await readOnlyFolder('locked')), 'permission denied')
 })
 
-test('a folder Seeker can’t write to is reported with its path, what breaks and who Seeker runs as', () => {
+test('folder checks never use synchronous calls: a slow network share would stall the server', async (t) => {
+  const statSync = t.mock.method(fsSync, 'statSync')
+  const accessSync = t.mock.method(fsSync, 'accessSync')
+  await folders.folderProblems()
+  await folders.folderProblem(dirs.music)
+  assert.equal(statSync.mock.callCount() + accessSync.mock.callCount(), 0)
+})
+
+test('a folder Seeker can’t write to is reported with its path, what breaks and who Seeker runs as', async () => {
   const message = folders.folderMessage('music', 'permission denied')
   assert.match(message, new RegExp(`music folder, ${dirs.music}: permission denied`))
   assert.match(message, /can’t be filed into your library/)
   assert.match(message, new RegExp(`user ${uid} and group ${gid}`))
   // A missing import folder is fine: importing is optional.
-  assert.deepEqual(folders.folderProblems(), { downloads: null, music: null, import: null })
+  assert.deepEqual(await folders.folderProblems(), { downloads: null, music: null, import: null })
 })
 
 test('startup: a data folder Seeker can’t write to stops it with the fix, not an SQLite error', { skip: asRoot, timeout: 30_000 }, async () => {

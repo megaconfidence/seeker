@@ -166,6 +166,10 @@ reporting the last commit that built an image.
   owned by the user isn't writable for container user 1000. The entrypoint fixes `/data` when the container starts as
   root (`PUID`/`PGID`); with `--user` it can't. `db.ts` calls `ensureDataDir()` before opening SQLite, so a data folder
   Seeker can't write to stops it with the ids and the `chown` to run, never a raw `SQLITE_CANTOPEN`.
+- Never touch the music, downloads or import folders with synchronous `fs` calls. On a congested network share a
+  `statSync` holds the event loop for as long as the share takes to answer, and `/healthz` with it (it took 7.5 s on
+  the owner's server). `folderProblem()` is asynchronous; `folderProblemSync()` is only for the data folder at startup,
+  because SQLite opens there synchronously right after.
 - A scan that can't see the music folder must never empty the library index (a downed NFS mount once would have).
   `scanLibrary()` refuses when the folder is missing, unreadable, or empty while the index has tracks, or when more
   than half the tracks (and at least 100) would go, unless `force` is passed; unreadable subfolders keep their rows.

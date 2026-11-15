@@ -76,8 +76,20 @@ export function fsReason(error: unknown): string {
   }
 }
 
-// Why Seeker can't read and write a folder, or null when it can.
-export function folderProblem(dir: string): string | null {
+// Why Seeker can't read and write a folder, or null when it can. Never synchronous: a network share
+// that's slow to answer would stall the whole server, health check included.
+export async function folderProblem(dir: string): Promise<string | null> {
+  try {
+    if (!(await fs.promises.stat(dir)).isDirectory()) return 'it isn’t a folder'
+    await fs.promises.access(dir, fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK)
+    return null
+  } catch (error) {
+    return fsReason(error)
+  }
+}
+
+// Only for the data folder at startup: the database opens there synchronously right after.
+function folderProblemSync(dir: string): string | null {
   try {
     if (!fs.statSync(dir).isDirectory()) return 'it isn’t a folder'
     fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK)
@@ -132,7 +144,7 @@ export function ensureDataDir(): void {
   } catch {
     // folderProblem says why
   }
-  const problem = folderProblem(config.dataDir) ?? databaseProblem(config.dataDir)
+  const problem = folderProblemSync(config.dataDir) ?? databaseProblem(config.dataDir)
   if (problem) stop(dataFolderMessage(config.dataDir, problem))
 }
 
@@ -158,17 +170,19 @@ export function folderMessage(folder: Folder, problem: string): string {
 }
 
 // The import folder is optional, so a missing one isn't a problem.
-export function folderProblems(): Record<Folder, string | null> {
+export async function folderProblems(): Promise<Record<Folder, string | null>> {
+  const folders = Object.keys(FOLDERS) as Folder[]
+  const found = await Promise.all(folders.map((folder) => folderProblem(FOLDERS[folder].dir())))
   const problems = {} as Record<Folder, string | null>
-  for (const folder of Object.keys(FOLDERS) as Folder[]) {
-    const problem = folderProblem(FOLDERS[folder].dir())
+  folders.forEach((folder, index) => {
+    const problem = found[index] ?? null
     problems[folder] = problem && !(folder === 'import' && problem === fsReason({ code: 'ENOENT' })) ? folderMessage(folder, problem) : null
-  }
+  })
   return problems
 }
 
-export function checkFolders(): void {
-  for (const message of Object.values(folderProblems())) if (message) log.warn(message)
+export async function checkFolders(): Promise<void> {
+  for (const message of Object.values(await folderProblems())) if (message) log.warn(message)
 }
 
 // For job logs: a failed file operation, with who Seeker runs as when permissions are the cause.

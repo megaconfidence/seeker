@@ -225,7 +225,7 @@ async function tagForLibrary(file: string, data: TagData, cover: Buffer | null, 
     if (NO_SPACE.has(errorCode(error))) throw error
     if (!isPermissionError(error)) return { file, info: null, note: `filed without new tags (${errorMessage(error)})` }
     const dir = path.dirname(file)
-    if (folderProblem(dir)) {
+    if (await folderProblem(dir)) {
       throw new Error(
         isImport
           ? `Seeker isn’t allowed to change ${file} or move it out of ${dir}. Let ${describeIdentity()} write there, or import with Copy.`

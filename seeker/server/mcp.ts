@@ -893,7 +893,7 @@ function buildServer(): McpServer {
           ...appStatus(),
           searchBudget: searchBudget(),
           folders: { music: config.musicDir, downloads: config.downloadsDir, import: config.importDir },
-          folderProblems: folderProblems(),
+          folderProblems: await folderProblems(),
           slskdUrl: config.slskdUrl,
           recentProblems: recentProblems(10).map((problem) => ({
             at: new Date(problem.at).toISOString(),

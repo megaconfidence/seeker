@@ -115,7 +115,7 @@ export async function musicFolderProblem(): Promise<string | null> {
   }
   const known = libraryCounts().tracks
   if (empty && known > 0) return `The music folder, ${dir}, is empty, but the library has ${tracks(known)}. ${unmountedHint}`
-  const access = folderProblem(dir)
+  const access = await folderProblem(dir)
   return access ? folderMessage('music', access) : null
 }
 
