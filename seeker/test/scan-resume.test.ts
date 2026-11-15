@@ -37,7 +37,7 @@ Object.assign(process.env, {
   SEEKER_SCAN_READ_MS: '1500',
   SEEKER_SCAN_CONCURRENCY: '3',
 })
-const { parseScanConcurrency } = await import('../server/config.ts')
+const { config, parseScanConcurrency } = await import('../server/config.ts')
 const { exec, get, getMeta } = await import('../server/db.ts')
 const { updateSettings } = await import('../server/settings.ts')
 updateSettings({ shares: { autoRescan: false } })
@@ -271,7 +271,7 @@ test('a scan stops by itself when file after file doesn’t answer, keeps what i
     // Two rounds of three reads at a time go unanswered, then it stops instead of trying the rest.
     const scan = await scanLibrary()
     assert.equal(scan.outcome, 'cancelled')
-    assert.match(scan.message, /^6 files in a row didn’t answer within 2 s, so Seeker stopped the library scan\. Check that the music folder’s network share is up\./)
+    assert.match(scan.message, /^6 files didn’t answer within 2 s, so Seeker stopped the library scan\. Check that the music folder’s network share is up\./)
     assert.equal(libraryStatus().problem?.message, scan.message, 'the Library page says why')
     assert.equal(libraryStatus().problem?.canForce, false)
     assert.ok(row(answering), 'what it read is kept')
@@ -284,6 +284,23 @@ test('a scan stops by itself when file after file doesn’t answer, keeps what i
   assert.equal(done.outcome, 'done')
   assert.equal(libraryStatus().problem, null)
   assert.equal(libraryCounts().tracks, 10)
+})
+
+test('reads stuck after being given up on stop a scan at 8, before they take libuv’s threads, however many run at once', async () => {
+  await reset()
+  for (let i = 1; i <= 30; i++) await put(`Z Stuck/Album/${pad(i)} - Stuck.mp3`, stuck)
+  const answer = holdStuckFiles()
+  const reads = config.scanConcurrency
+  // Two rounds of 12 would be 24 reads stuck at once, more than the 16 threads all file access shares.
+  config.scanConcurrency = 12
+  try {
+    const scan = await scanLibrary()
+    assert.equal(scan.outcome, 'cancelled')
+    assert.match(scan.message, /^8 files didn’t answer within 2 s, so Seeker stopped the library scan\./)
+  } finally {
+    config.scanConcurrency = reads
+    answer()
+  }
 })
 
 test('stopping a scan abandons reads that don’t answer, and drops the scan queued after it', async () => {
