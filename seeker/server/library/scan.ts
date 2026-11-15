@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { parseFile } from 'music-metadata'
 import type { Dirent } from 'node:fs'
 import type { LibraryProblem, LibraryStatus, ScanProgress, ScanResult } from '../../shared/types.ts'
 import { config } from '../config.ts'
@@ -14,6 +13,8 @@ import { noteInitialLibrary, noteLibraryChange } from '../shares.ts'
 import { eachLimit, errorMessage } from '../util.ts'
 import { rebuildOwnedIndex } from './owned.ts'
 import { metadataFromPath } from './pathmeta.ts'
+import { readTags } from './tags.ts'
+import type { TagReadOptions } from './tags.ts'
 
 const log = logger('library')
 
@@ -199,11 +200,9 @@ function first(value: string | string[] | undefined): string | undefined {
   return value
 }
 
-// Tags and stream details, without cover images: in FLAC and MP4 files those are most of what
-// would be read. (MP3s read their whole ID3v2 tag either way.) skipPostHeaders isn't used: it
-// drops ID3v1 tags when the ID3v2 tag holds anything at all, even just an encoder name.
-async function readTrack(file: string, mtime: number, size: number) {
-  const meta = await parseFile(file, { skipCovers: true, duration: false })
+// Tags and stream details, without reading cover images or the audio: see readTags() in tags.ts.
+async function readTrack(file: string, mtime: number, size: number, io: TagReadOptions = {}) {
+  const meta = await readTags(file, io)
   const common = meta.common
   const format = meta.format
   const tagTitle = common.title?.trim()
