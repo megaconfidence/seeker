@@ -80,7 +80,12 @@ class FileSource {
     const last = this.last
     const sequential = last && from >= last.start && from <= last.start + last.data.length + PAGE
     let size = Math.max(from === 0 ? HEAD : sequential ? Math.min(last.data.length * 2, MAX_WINDOW) : PAGE, window, end - from)
-    const start = from + size > this.size ? Math.max(0, this.size - size) : from
+    let start = from
+    if (from + size > this.size) {
+      // Ending at the end of the file, but not reading again what an earlier window holds.
+      const read = this.windows.map((loaded) => loaded.start + loaded.data.length).filter((loadedEnd) => loadedEnd <= from)
+      start = Math.max(0, this.size - size, ...read)
+    }
     size = Math.min(size, this.size - start)
     const loaded: Window = { start, data: await this.fetch(start, size) }
     this.windows.push(loaded)
@@ -220,11 +225,11 @@ async function readMpeg(file: string, source: FileSource): Promise<IAudioMetadat
   const splice = new Splice(source, tags.prefix, tags.audioStart)
   if (tags.frames > 0) {
     // First without the end of the file: ID3v1 and APEv2 tags there cost another read, and aren't
-    // needed when ID3v2 has the title, artist and album. (skipPostHeaders skips ID3v1 when ID3v2
-    // gave any tag at all.)
+    // needed when ID3v2 has the title, artist, album and track number. (skipPostHeaders skips
+    // ID3v1 when ID3v2 gave any tag at all.)
     const meta = await parse(file, splice, false, { skipPostHeaders: true })
-    const { title, artist, album } = meta.common
-    if (title && artist && album && !meta.native.ID3v1) return meta
+    const { title, artist, album, track } = meta.common
+    if (title && artist && album && track.no && !meta.native.ID3v1) return meta
   }
   return parse(file, splice, true)
 }

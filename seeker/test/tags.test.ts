@@ -87,11 +87,11 @@ const oldRead = (file: string) => parseFile(file, { skipCovers: true, duration: 
 
 // readTags gives what parseFile gave, and `expected` on top.
 async function same(file: string, expected: Partial<Fields> = {}) {
-  const { meta, bytes } = await measure(file)
+  const { meta, bytes, reads: count } = await measure(file)
   const after = fields(meta)
   assert.deepEqual(after, fields(await oldRead(file)), path.basename(file))
   assert.deepEqual(after, { ...after, ...expected }, path.basename(file))
-  return { fields: after, bytes }
+  return { fields: after, bytes, reads: count }
 }
 
 // A hand-built ID3v2 tag, so versions, frame order, flags and padding are under control.
@@ -267,9 +267,9 @@ test('hand-built v2.2, v2.3 and v2.4 tags read as music-metadata reads them', as
 
 test('MP3s read under 64 kB with a 4 MB cover first or last, and the tags around it are found', async () => {
   for (const [name, tag] of [
-    ['cover-first.mp3', id3(3, [picture(3, COVER), text('TIT2', 'First'), text('TPE1', 'Artist'), text('TALB', 'Album')], { padding: 2048 })],
-    ['cover-last.mp3', id3(4, [text('TIT2', 'Last'), text('TPE1', 'Artist'), text('TALB', 'Album'), picture(4, COVER)])],
-    ['covers-v22.mp3', id3(2, [picture(2, COVER), text('TT2', 'Twice'), picture(2, COVER), text('TP1', 'Artist'), text('TAL', 'Album')])],
+    ['cover-first.mp3', id3(3, [picture(3, COVER), text('TIT2', 'First'), text('TPE1', 'Artist'), text('TALB', 'Album'), text('TRCK', '1')], { padding: 2048 })],
+    ['cover-last.mp3', id3(4, [text('TIT2', 'Last'), text('TPE1', 'Artist'), text('TALB', 'Album'), text('TRCK', '2'), picture(4, COVER)])],
+    ['covers-v22.mp3', id3(2, [picture(2, COVER), text('TT2', 'Twice'), picture(2, COVER), text('TP1', 'Artist'), text('TAL', 'Album'), text('TRK', '3')])],
   ] as const) {
     const file = await mp3(name, tag, audio.cbr)
     const { meta, bytes, reported, reads: count } = await measure(file)
@@ -283,7 +283,7 @@ test('MP3s read under 64 kB with a 4 MB cover first or last, and the tags around
 })
 
 test('durations of CBR, VBR and header-less MP3s come out as before', async () => {
-  const tag = id3(3, [text('TIT2', 'Length'), text('TPE1', 'Artist'), text('TALB', 'Album'), picture(3, COVER)])
+  const tag = id3(3, [text('TIT2', 'Length'), text('TPE1', 'Artist'), text('TALB', 'Album'), text('TRCK', '1'), picture(3, COVER)])
   for (const [name, data] of Object.entries(audio)) {
     const { fields: { duration }, bytes } = await same(await mp3(`length-${name}.mp3`, tag, data))
     assert.ok(duration && Math.abs(duration - 2) < 0.1, `${name}: ${duration}`)
@@ -291,9 +291,17 @@ test('durations of CBR, VBR and header-less MP3s come out as before', async () =
   }
 })
 
-test('ID3v1 and APEv2 tags are read when the ID3v2 tag lacks the title, artist or album', async () => {
+test('ID3v1 and APEv2 tags are read when the ID3v2 tag lacks the title, artist, album or track number', async () => {
   const v1 = id3v1({ title: 'Only In V1', artist: 'Old Tagger', album: 'Tail', year: '1999', track: 7 })
   await same(await mp3('v1-only.mp3', audio.cbr, v1), { title: 'Only In V1', artist: 'Old Tagger', album: 'Tail', track: 7, year: 1999 })
+  // With all four in ID3v2, the end of the file isn't read: the start, then past the cover.
+  const named = [picture(3, COVER), text('TIT2', 'From V2'), text('TPE1', 'V2 Artist'), text('TALB', 'V2 Album')]
+  const complete = await same(await mp3('complete.mp3', id3(3, [...named, text('TRCK', '7'), text('TYER', '1999')]), audio.cbr, v1), { title: 'From V2', track: 7 })
+  assert.equal(complete.reads, 2)
+  // Without a track number in ID3v2, ID3v1's is read, one read more.
+  const trackless = await same(await mp3('trackless.mp3', id3(3, named), audio.cbr, v1), { title: 'From V2', artist: 'V2 Artist', album: 'V2 Album', track: 7 })
+  assert.equal(trackless.reads, 3)
+  assert.ok(trackless.bytes < BUDGET, `read ${trackless.bytes} bytes`)
   // An ID3v2 tag holding just the encoder, or just a cover: the real tags are in ID3v1.
   await same(await mp3('encoder-only.mp3', id3(4, [text('TSSE', 'LAME 3.100')]), audio.cbr, v1), { title: 'Only In V1', artist: 'Old Tagger', album: 'Tail' })
   const coverOnly = await same(await mp3('cover-only.mp3', id3(3, [picture(3, COVER)]), audio.bare, v1), { title: 'Only In V1', artist: 'Old Tagger', album: 'Tail' })
