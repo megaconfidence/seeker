@@ -191,8 +191,16 @@ reporting the last commit that built an image.
   ffmpeg (seeded noise; the fake FLAC is a real MP3 round trip).
 - `test/mcp.test.ts`: the MCP server through the official client, with no socket. It checks the full tool list,
   progress fields, settings masking and tokens.
-- `test/shares.test.ts`: share rescans against the fake slskd, which can simulate a scan in progress (409s).
-- `test/library.test.ts`: library scans with a missing, empty or unreadable music folder, mass removals and `force`.
+- `test/processing.test.ts`: filing downloads when storage fails: unavailable or read-only music folders, no space
+  (including while tagging and in the data folder), vanished downloads, index failures and the processing backoff.
+  Errors are injected by mocking `fs`, or with SQLite triggers and renamed tables.
+- `test/shares.test.ts`: share rescans against the fake slskd, which can simulate a scan in progress (409s) and a
+  share count (`sharedFiles`).
+- `test/share-startup.test.ts`: the first-index rescan decision, old share settings, and a pending rescan surviving a
+  restart (a second Node process on the same database).
+- `test/settings.test.ts`: saved settings outside today's limits.
+- `test/library.test.ts` and `test/library-threshold.test.ts`: library scans with a missing, empty or unreadable
+  music folder, the mass-removal limit, `force`, and atomic index commits.
 - `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
   folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.
