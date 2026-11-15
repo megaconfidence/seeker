@@ -1,5 +1,6 @@
-// Long library scans: what they read is saved in batches as they go, and a first scan cut off part
-// way is still the first scan when it resumes.
+// Long library scans: what they read is saved in batches as they go, a first scan cut off part way
+// is still the first scan when it resumes, and SEEKER_SCAN_CONCURRENCY sets how many files are read
+// at once.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { rmSync } from 'node:fs'
@@ -27,13 +28,15 @@ const sizes = { slow: (await fs.stat(slow)).size }
 Object.assign(process.env, {
   SEEKER_DATA_DIR: dirs.data, SEEKER_MUSIC_DIR: dirs.music, SEEKER_DOWNLOADS_DIR: dirs.downloads, SEEKER_IMPORT_DIR: dirs.import,
   SLSKD_URL: 'http://127.0.0.1:9', SLSKD_API_KEY: 'seeker-test-key', SEEKER_LOG_LEVEL: process.env.SEEKER_LOG_LEVEL || 'error',
-  // A batch at least every 150 ms instead of 15 s.
+  // A batch at least every 150 ms instead of 15 s, and three files read at once.
   SEEKER_SCAN_BATCH_MS: '150',
+  SEEKER_SCAN_CONCURRENCY: '3',
 })
+const { parseScanConcurrency } = await import('../server/config.ts')
 const { exec, getMeta } = await import('../server/db.ts')
 const { updateSettings } = await import('../server/settings.ts')
 updateSettings({ shares: { autoRescan: false } })
-const { libraryCounts, libraryStatus, scanLibrary } = await import('../server/library/scan.ts')
+const { libraryCounts, libraryStatus, networkFilesystem, scanLibrary } = await import('../server/library/scan.ts')
 const { listAlbums } = await import('../server/library/serve.ts')
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -71,6 +74,8 @@ const realRead = FileHandle.read
 const handleSizes = new WeakMap<object, number>()
 const started = new WeakSet<object>()
 let slowMs = 0
+let slowNow = 0
+let slowMost = 0
 FileHandle.read = async function (this: { stat(): Promise<{ size: number }> }, ...args: unknown[]) {
   let size = handleSizes.get(this)
   if (size === undefined) {
@@ -79,7 +84,9 @@ FileHandle.read = async function (this: { stat(): Promise<{ size: number }> }, .
   }
   if (size === sizes.slow && slowMs && !started.has(this)) {
     started.add(this)
+    slowMost = Math.max(slowMost, ++slowNow)
     await sleep(slowMs)
+    slowNow--
   }
   return realRead.apply(this, args)
 }
@@ -127,4 +134,36 @@ test('a first scan cut off after its last batch still finishes as the first scan
   assert.equal(getMeta('library_indexed'), '1')
   assert.equal(sharesTold(), true, 'the end of the first scan was announced')
   updateSettings({ shares: { rescanOnFirstScan: false } })
+})
+
+test('a scan reads as many files at once as SEEKER_SCAN_CONCURRENCY says', async () => {
+  await reset()
+  for (let i = 1; i <= 8; i++) await put(`Slow/Album/${pad(i)} - Slow.mp3`, slow)
+  slowMs = 40
+  slowMost = 0
+  try {
+    assert.equal((await scanLibrary()).updated, 8)
+  } finally {
+    slowMs = 0
+  }
+  assert.equal(slowMost, 3)
+})
+
+test('SEEKER_SCAN_CONCURRENCY is a number from 1 to 64; network filesystems are told apart by their statfs type', () => {
+  assert.equal(parseScanConcurrency(''), null)
+  assert.equal(parseScanConcurrency('8'), 8)
+  assert.equal(parseScanConcurrency('1'), 1)
+  assert.equal(parseScanConcurrency('2.5'), 2)
+  assert.equal(parseScanConcurrency('500'), 64)
+  for (const value of ['0', '-4', 'lots']) assert.equal(parseScanConcurrency(value), null, value)
+
+  assert.equal(networkFilesystem(0x6969), 'NFS')
+  assert.equal(networkFilesystem(0x517b), 'SMB')
+  assert.equal(networkFilesystem(0xfe534d42), 'SMB2')
+  assert.equal(networkFilesystem(0x65735546), 'FUSE')
+  assert.equal(networkFilesystem(0xff534d42), 'CIFS')
+  assert.equal(networkFilesystem(0xff534d42 | 0), 'CIFS', 'reported as a negative 32-bit number')
+  assert.equal(networkFilesystem(0xef53), null, 'ext4')
+  assert.equal(networkFilesystem(0x01021994), null, 'tmpfs')
+  assert.equal(networkFilesystem(0x9123683e), null, 'Btrfs')
 })

@@ -196,8 +196,11 @@ reporting the last commit that built an image.
   and no flag, and aren't first scans. Later scans call `noteLibraryChange()` when they finish, never per batch: a
   share rescan during a long scan would double the load on the share.
 - Scans are slow on network shares because of round trips, not bytes: a 5,000-track NFS library took hours one
-  operation at a time. So listings and stats run 16 at a time and tag reads 12 (`eachLimit()`), with
-  `UV_THREADPOOL_SIZE=16` in the image (file reads use libuv's pool, 4 threads by default). Albums take their cover
+  operation at a time. So listings and stats run 16 at a time (`eachLimit()`), and tag reads 12, or 4 when `statfs`
+  says the music folder is on a network filesystem (a bind mount reports its source's type), unless
+  `SEEKER_SCAN_CONCURRENCY` says otherwise. The image sets `UV_THREADPOOL_SIZE=16`, as file reads use libuv's pool (4
+  threads by default). A dozen reads at once kept the owner's NFS server, and everything using it, busy (issue #1).
+  Albums take their cover
   image from the listing, never a second listing per album. With `duration: false`, music-metadata reads only headers;
   `skipCovers` keeps FLAC and MP4 covers from being read (MP3s read their whole ID3v2 tag regardless). Don't add
   `skipPostHeaders`: it drops ID3v1 tags whenever the ID3v2 tag holds anything, even an encoder name, for a 128-byte
@@ -232,8 +235,8 @@ reporting the last commit that built an image.
   music folder, the mass-removal limit, `force`, and atomic index commits.
 - `test/scan.test.ts`: scan speed and its side effects: bytes read (counted through `FileHandle.read`), NAS folders,
   progress, one listing per folder, embedded covers checked on demand, and an import during a slowed-down full scan.
-- `test/scan-resume.test.ts`: batches saved while a slowed scan reads, and a first scan cut off before its final
-  commit. Reads are slowed per file by patching `FileHandle.read`, told apart by size.
+- `test/scan-resume.test.ts`: batches saved while a slowed scan reads, a first scan cut off before its final commit,
+  and `SEEKER_SCAN_CONCURRENCY`. Reads are slowed per file by patching `FileHandle.read`, told apart by size.
 - `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
   folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.

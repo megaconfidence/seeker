@@ -9,8 +9,9 @@ RUN npm run build
 FROM node:24-alpine
 RUN apk add --no-cache ffmpeg chromaprint tini su-exec
 WORKDIR /app
-# UV_THREADPOOL_SIZE: library scans read up to 12 files at once (16 listings), and file reads run in
-# libuv's thread pool, 4 threads by default.
+# UV_THREADPOOL_SIZE: library scans read up to 12 files at once (4 on a network share, unless
+# SEEKER_SCAN_CONCURRENCY says) and 16 listings, and file reads run in libuv's thread pool, 4 threads
+# by default.
 ENV NODE_ENV=production \
     UV_THREADPOOL_SIZE=16 \
     SEEKER_PORT=7335 \

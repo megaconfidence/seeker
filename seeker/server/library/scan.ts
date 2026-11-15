@@ -27,7 +27,27 @@ const SKIPPED_FOLDERS = new Set(['@eadir', '#recycle', '#snapshot', '@recycle', 
 // Listings, stats and tag reads mostly wait on the disk or the network share, so several run at
 // once. File reads use libuv's thread pool, which the image enlarges (UV_THREADPOOL_SIZE).
 const LIST_CONCURRENCY = 16
-const READ_CONCURRENCY = 12
+// Tag reads at once, unless SEEKER_SCAN_CONCURRENCY says. On a network share every read is a few
+// round trips, and a dozen at once kept an NFS server, and everything else using it, busy.
+const LOCAL_READS = 12
+const NETWORK_READS = 4
+// statfs types of network filesystems. FUSE covers sshfs, rclone, GlusterFS and the like.
+const NETWORK_FILESYSTEMS = new Map<number, string>([
+  [0x6969, 'NFS'],
+  [0x517b, 'SMB'],
+  [0xff534d42, 'CIFS'],
+  [0xfe534d42, 'SMB2'],
+  [0x65735546, 'FUSE'],
+  [0x01021997, '9P'],
+  [0x00c36400, 'Ceph'],
+  [0x5346414f, 'AFS'],
+  [0x6b414653, 'AFS'],
+  [0x73757245, 'Coda'],
+  [0x0bd00bd0, 'Lustre'],
+  [0x47504653, 'GPFS'],
+  [0x19830326, 'BeeGFS'],
+  [0x564c, 'NCP'],
+])
 // A full scan saves what it has read every BATCH_SIZE tracks (or config.timing.scanBatchMs), so a
 // restart or a stopped scan keeps it, and albums show up while a long first scan runs.
 const BATCH_SIZE = 200
@@ -265,6 +285,29 @@ async function readTrack(file: string, mtime: number, size: number, io: TagReadO
 }
 
 type TrackRow = Awaited<ReturnType<typeof readTrack>>
+
+// What a statfs type says about a folder: the network filesystem it's on, or null. The types are
+// 32-bit magic numbers, which some platforms report as negative.
+export function networkFilesystem(type: number): string | null {
+  return NETWORK_FILESYSTEMS.get(type >>> 0) ?? null
+}
+
+// How many files to read at once, logged when `report` is set. A Docker bind mount reports the
+// filesystem it comes from, so this sees an NFS share mounted on the host too.
+async function readConcurrency(report: boolean): Promise<number> {
+  const choose = (reads: number, why: string) => {
+    if (report) log.info(`Library scan: reading ${reads} ${reads === 1 ? 'file' : 'files'} at a time${why}`)
+    return reads
+  }
+  if (config.scanConcurrency) return choose(config.scanConcurrency, ', as SEEKER_SCAN_CONCURRENCY says')
+  const otherwise = '; SEEKER_SCAN_CONCURRENCY changes that'
+  try {
+    const filesystem = networkFilesystem((await fs.statfs(config.musicDir)).type)
+    return filesystem ? choose(NETWORK_READS, `, because the music folder is on ${filesystem}${otherwise}`) : choose(LOCAL_READS, otherwise)
+  } catch (error) {
+    return choose(NETWORK_READS, `, because Seeker can’t tell what the music folder is on (${fsReason(error)})${otherwise}`)
+  }
+}
 
 function upsertTrack(row: TrackRow, now: number) {
   exec(
@@ -629,6 +672,7 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
 
   let updated = 0
   const saved = batches(covers, announce)
+  const reads = toRead.length ? await readConcurrency(true) : LOCAL_READS
   const onBytes = (bytes: number) => {
     bytesRead += bytes
   }
@@ -647,7 +691,7 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
     reportProgress()
   }
   try {
-    await eachLimit(toRead, READ_CONCURRENCY, read)
+    await eachLimit(toRead, reads, read)
   } catch (error) {
     // No batch is saved once the scan is over.
     await saved.finish().catch(() => {})
@@ -684,7 +728,7 @@ async function scanFolder(force: boolean): Promise<ScanResult> {
 export async function scanFiles(files: string[]): Promise<void> {
   indexedElsewhere(files)
   const updates: TrackRow[] = []
-  await eachLimit(files, READ_CONCURRENCY, async (file) => {
+  await eachLimit(files, await readConcurrency(false), async (file) => {
     try {
       const stat = await fs.stat(file)
       updates.push(await readTrack(file, Math.floor(stat.mtimeMs), stat.size))

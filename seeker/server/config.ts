@@ -10,6 +10,13 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(value) && value > 0 ? value : fallback
 }
 
+// SEEKER_SCAN_CONCURRENCY: how many files a library scan reads at once, 1 to 64 (more is capped).
+// Null when it isn't set or isn't a number: scans then go by the music folder's filesystem.
+export function parseScanConcurrency(value: string): number | null {
+  const count = Number(value)
+  return Number.isFinite(count) && count >= 1 ? Math.min(64, Math.floor(count)) : null
+}
+
 // The container entrypoint applies UMASK to the process; files moved into the library get the
 // matching mode, 644 by default.
 function fileMode(): number {
@@ -37,6 +44,7 @@ export const config = {
   deezerUrl: env('SEEKER_DEEZER_URL', 'https://api.deezer.com').replace(/\/+$/, ''),
   musicbrainzUrl: env('SEEKER_MUSICBRAINZ_URL', 'https://musicbrainz.org/ws/2').replace(/\/+$/, ''),
   coverArtUrl: env('SEEKER_COVERART_URL', 'https://coverartarchive.org').replace(/\/+$/, ''),
+  scanConcurrency: parseScanConcurrency(env('SEEKER_SCAN_CONCURRENCY')),
   timing: {
     pollMs: num('SEEKER_POLL_MS', 2000),
     // How often slskd's status (connection, sharing, share scans) is read.

@@ -155,6 +155,7 @@ Environment variables:
 | `SLSKD_URL` | slskd's address, as Seeker reaches it | `http://slskd:5030` |
 | `SLSKD_API_KEY` | slskd API key that can make changes | |
 | `ACOUSTID_API_KEY` | Optional: fingerprint every download | |
+| `SEEKER_SCAN_CONCURRENCY` | Optional: how many files a library scan reads at once, from 1 to 64 | 4 on a network share, 12 otherwise |
 | `PUID`, `PGID` | User and group Seeker runs as; the same as slskd's | `1000` |
 | `UMASK` | Permissions for new files and folders; `002` makes them writable for the group | `022` |
 | `TZ` | Time zone | `UTC` |
@@ -226,6 +227,9 @@ next one continues where it left off. Folders NAS systems keep next to your musi
 and the like) are skipped. Cover art embedded in the files isn't read during a scan; Seeker looks for it the first time
 an album without a cover image in its folder is shown. Music that finishes downloading during a scan is added straight
 away.
+
+On a network share (NFS, SMB, or a FUSE mount such as sshfs or rclone), Seeker reads 4 files at a time instead of 12,
+so a scan doesn't crowd out everything else using the share; `SEEKER_SCAN_CONCURRENCY` sets the number yourself.
 
 **Deletes are permanent.** Seeker has no recycle bin or undo for music files. Deleting a track or album removes its
 audio files, and upgrades permanently replace lower-quality copies after better files are filed. Back up your music
@@ -343,6 +347,8 @@ and download files Seeker can access; check their permissions before switching.
   download's details say why.
 - **The library stopped updating**: Seeker can't see your music, usually because a network share isn't mounted, so
   it keeps the index. It looks again every 10 minutes, or press **Rescan** on the Library page.
+- **A library scan makes the server or the share slow**: set `SEEKER_SCAN_CONCURRENCY` to read fewer files at once
+  (`2`, say), or more for a fast NAS.
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.
