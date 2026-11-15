@@ -162,6 +162,8 @@ reporting the last commit that built an image.
   than half the tracks (and at least 100) would go, unless `force` is passed; unreadable subfolders keep their rows.
   The refusal is `library.problem` in the status. Never `mkdir` the music folder: that hides a missing mount, and
   `processJob()` refuses to file while `musicFolderProblem()` reports one.
+- Music-folder failures keep jobs in `processing` with downloaded rows intact. `next_retry_at` persists the ten-minute
+  processing retry; `retryJob()` resumes those files directly. Never settle or clean up a job waiting for music.
 - Never file a track that kept the uploader's tags because of a permission error. When Seeker can't change a file,
   `tagForLibrary()` in `jobs/process.ts` tags a copy if it can remove the original, and otherwise fails the file.
 

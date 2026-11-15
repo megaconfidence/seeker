@@ -158,8 +158,8 @@ async function existingVariant(destination: string): Promise<string | null> {
       const ext = path.extname(name).toLowerCase()
       if (AUDIO_EXTENSIONS.has(ext) && path.basename(name, path.extname(name)) === stem) return path.join(dir, name)
     }
-  } catch {
-    // directory doesn't exist yet
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
   return null
 }
@@ -256,7 +256,29 @@ async function replaceOldTrack(albumId: string, track: TargetTrack, destination:
   return true
 }
 
-export async function processJob(jobId: string): Promise<{ failedTracks: number[] }> {
+const MUSIC_ERRORS = new Set(['EACCES', 'EPERM', 'EROFS', 'ENOENT', 'ESTALE', 'EIO'])
+
+function waitForMusic(jobId: string, message: string) {
+  if (store.getJob(jobId)?.error !== message) store.logJob(jobId, 'warn', `${message} Downloads are kept; retry once the folder is back.`)
+  store.patchJob(jobId, { error: message })
+  store.setPhase(jobId, 'Waiting for the music folder')
+}
+
+// Check the nearest existing destination folder without creating anything on a missing mount.
+async function checkDestination(destination: string) {
+  let dir = path.dirname(destination)
+  for (;;) {
+    try {
+      await fs.access(dir, fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK)
+      return
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || dir === config.musicDir) throw error
+      dir = path.dirname(dir)
+    }
+  }
+}
+
+export async function processJob(jobId: string): Promise<{ failedTracks: number[]; waitingForMusic?: boolean }> {
   const job = store.getJob(jobId)
   if (!job) return { failedTracks: [] }
   const settings = getSettings()
@@ -267,14 +289,14 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
   const failedTracks: number[] = []
   const imported: string[] = []
   let touchedLibrary = false
+  let waitingForMusic = false
 
   // Filing into a share that isn't mounted would put music where nobody looks for it (or inside
   // the container), so nothing moves until the folder is back.
   const musicProblem = rows.length ? await musicFolderProblem() : null
   if (musicProblem) {
-    for (const row of rows) store.patchFile(row.id, { state: 'failed', error: musicProblem })
-    store.logJob(jobId, 'error', `${musicProblem} Nothing was moved; retry once the folder is back.`)
-    return { failedTracks }
+    waitForMusic(jobId, musicProblem)
+    return { failedTracks, waitingForMusic: true }
   }
 
   if (target && rows.some((row) => row.track_index !== null)) {
@@ -288,6 +310,13 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
   const copyMode = isImport && target?.importMode === 'copy'
 
   for (const [position, row] of rows.entries()) {
+    if (store.getJob(jobId)?.status === 'cancelled') break
+    const musicProblem = await musicFolderProblem()
+    if (musicProblem) {
+      waitForMusic(jobId, musicProblem)
+      waitingForMusic = true
+      break
+    }
     const track = target && row.track_index !== null ? (target.tracks[row.track_index] ?? null) : null
     const name = track ? `“${track.title}”` : path.basename(row.filename.replace(/\\/g, '/'))
     store.setPhase(jobId, `${isImport ? 'Importing' : 'Checking'} files (${position + 1} of ${rows.length})`)
@@ -309,6 +338,8 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
     }
 
     let working = local
+    let onMusic = insideLibrary(local)
+    let filedIntoLibrary = false
     try {
       if (copyMode) {
         const tempDir = path.join(config.dataDir, 'tmp', jobId)
@@ -349,6 +380,8 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
             )
           : await destinationFromTags(working, row, settings.naming.template, ext)
 
+      onMusic = true
+      await checkDestination(destination)
       const existing = await existingVariant(destination)
       const sameFile = existing && path.resolve(existing) === path.resolve(local)
       if (existing && !sameFile) {
@@ -363,6 +396,7 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
 
       let filed = working
       let note: string | null = null
+      onMusic = insideLibrary(working)
       if (target && track) {
         const copy = path.join(config.dataDir, 'tmp', jobId, `${row.id}-tagged${path.extname(working)}`)
         const tagged = await tagForLibrary(working, tagsFor(target, track), cover, copy, isImport)
@@ -372,15 +406,32 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
         if (note) store.logJob(jobId, 'warn', `${name}: ${note}`)
       }
       if (path.resolve(filed) !== path.resolve(destination)) {
+        onMusic = true
+        const musicProblem = await musicFolderProblem()
+        if (musicProblem) {
+          waitForMusic(jobId, musicProblem)
+          waitingForMusic = true
+          break
+        }
         const leftover = await moveFile(filed, destination)
         if (leftover) store.logJob(jobId, 'warn', `${name}: filed, but ${filed} couldn’t be removed (${fileErrorMessage(leftover)})`)
       }
+      store.patchFile(row.id, { state: 'imported', local_path: destination, error: note })
+      exec(
+        `INSERT OR REPLACE INTO imports (path, deezer_album_id, deezer_track_id, mb_release_id, job_id, at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [destination, target?.album.deezerId ?? null, track?.deezerId ?? null, target?.album.mbReleaseId ?? null, jobId, Date.now()],
+      )
+      imported.push(destination)
+      filedIntoLibrary = true
+      if (row.transfer_id) void slskd.cancel(row.username, row.transfer_id, true)
       // A tagged copy went in because the original couldn't be changed; remove the original, as a move would.
       if (filed !== working && !copyMode && path.resolve(working) !== path.resolve(destination)) {
         await fs.rm(working, { force: true }).catch((error) => {
           store.logJob(jobId, 'warn', `${name}: filed a tagged copy, but couldn’t remove ${working} (${fileErrorMessage(error)})`)
         })
       }
+      onMusic = true
       if (existing && !sameFile && path.resolve(existing) !== path.resolve(destination)) await fs.rm(existing, { force: true })
       if (target?.replaceLibraryAlbumId && track && (await replaceOldTrack(target.replaceLibraryAlbumId, track, destination, info))) {
         touchedLibrary = true
@@ -390,18 +441,20 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
         await removeEmptyDirs(path.dirname(local), config.musicDir)
       }
       if (isImport && !copyMode && path.resolve(local).startsWith(config.importDir + path.sep)) {
+        onMusic = false
         await removeEmptyDirs(path.dirname(local), config.importDir)
       }
-      store.patchFile(row.id, { state: 'imported', local_path: destination, error: note })
-      exec(
-        `INSERT OR REPLACE INTO imports (path, deezer_album_id, deezer_track_id, mb_release_id, job_id, at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [destination, target?.album.deezerId ?? null, track?.deezerId ?? null, target?.album.mbReleaseId ?? null, jobId, Date.now()],
-      )
-      imported.push(destination)
-      if (row.transfer_id) void slskd.cancel(row.username, row.transfer_id, true)
     } catch (error) {
       if (copyMode) await fs.rm(working, { force: true }).catch(() => {})
+      if (onMusic && MUSIC_ERRORS.has((error as NodeJS.ErrnoException).code ?? '')) {
+        waitForMusic(jobId, `New music can’t be filed into ${config.musicDir}: ${fileErrorMessage(error)}`)
+        waitingForMusic = true
+        break
+      }
+      if (filedIntoLibrary) {
+        store.logJob(jobId, 'warn', `${name}: filed, but cleanup failed (${fileErrorMessage(error)})`)
+        continue
+      }
       store.patchFile(row.id, { state: 'failed', error: fileErrorMessage(error) })
       store.logJob(jobId, 'error', `${name}: ${fileErrorMessage(error)}`)
     }
@@ -420,7 +473,8 @@ export async function processJob(jobId: string): Promise<{ failedTracks: number[
     scheduleJellyfinRefresh()
     store.logJob(jobId, 'info', `Added ${imported.length} ${imported.length === 1 ? 'track' : 'tracks'} to your library`)
   }
-  return { failedTracks }
+  if (waitingForMusic) store.setPhase(jobId, 'Waiting for the music folder')
+  return { failedTracks, waitingForMusic }
 }
 
 export type { JobRow }

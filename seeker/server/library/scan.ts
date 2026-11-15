@@ -6,7 +6,7 @@ import type { LibraryProblem, LibraryStatus, ScanResult } from '../../shared/typ
 import { config } from '../config.ts'
 import { all, exec, get, transaction } from '../db.ts'
 import { emit } from '../events.ts'
-import { fsReason } from '../folders.ts'
+import { folderMessage, folderProblem, fsReason } from '../folders.ts'
 import { logger } from '../log.ts'
 import { normalize, stripExtras } from '../match/normalize.ts'
 import { noteLibraryChange } from '../shares.ts'
@@ -48,14 +48,22 @@ const unmountedHint = 'If it’s a network share, check that it’s mounted.'
 // than an empty library.
 export async function musicFolderProblem(): Promise<string | null> {
   const dir = config.musicDir
+  let empty = true
   try {
     if (!(await fs.stat(dir)).isDirectory()) return `The music folder, ${dir}, isn’t a folder.`
-    for await (const entry of await fs.opendir(dir)) if (!entry.name.startsWith('.')) return null
+    for await (const entry of await fs.opendir(dir)) {
+      if (!entry.name.startsWith('.')) {
+        empty = false
+        break
+      }
+    }
   } catch (error) {
     return `Seeker can’t read the music folder, ${dir} (${fsReason(error)}). ${unmountedHint}`
   }
   const known = libraryCounts().tracks
-  return known > 0 ? `The music folder, ${dir}, is empty, but the library has ${tracks(known)}. ${unmountedHint}` : null
+  if (empty && known > 0) return `The music folder, ${dir}, is empty, but the library has ${tracks(known)}. ${unmountedHint}`
+  const access = folderProblem(dir)
+  return access ? folderMessage('music', access) : null
 }
 
 export function albumIdFor(albumArtist: string, album: string): string {

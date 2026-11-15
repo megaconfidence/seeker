@@ -537,7 +537,11 @@ function buildServer(): McpServer {
 
   server.registerTool(
     'retry_download',
-    { title: 'Retry a download', description: 'Try a failed, cancelled or waiting download again now.', inputSchema: { job_id: z.string() } },
+    {
+      title: 'Retry a download',
+      description: 'Try a failed, cancelled or waiting download again now. Downloads waiting for the music folder resume filing the existing files without downloading again.',
+      inputSchema: { job_id: z.string() },
+    },
     async ({ job_id }) =>
       guard(async () => {
         retryJob(job_id)

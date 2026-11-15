@@ -302,9 +302,12 @@ rm -f /path/to/seeker-data/seeker.db-wal /path/to/seeker-data/seeker.db-shm
   **Settings → Soulseek** and let slskd rescan on a schedule with `SLSKD_SHARE_CACHE_RETENTION` (in minutes; see
   [share cache](https://github.com/slskd/slskd/blob/master/docs/config.md#cache) in slskd's docs). New music is then shared
   after slskd's next rescan, or when you press **Rescan**. Downloads that start while slskd is busy wait for it.
-- **The library stopped updating, or downloads fail with "the music folder … is empty"**: Seeker can't see your
-  music, usually because a network share isn't mounted, so it keeps the library and doesn't file anything until the
-  folder is back. It looks again every 10 minutes, or press **Rescan** on the Library page.
+- **A download says "Waiting for the music folder"**: the music folder is missing, empty, read-only or temporarily
+  unavailable. Seeker keeps the downloaded files and any tracks already filed, then retries every 10 minutes. Fix
+  the mount or permissions and press **Try again** in Downloads to resume immediately, without downloading again.
+  Cancelling the job explicitly removes its downloaded files.
+- **The library stopped updating**: Seeker can't see your music, usually because a network share isn't mounted, so
+  it keeps the index. It looks again every 10 minutes, or press **Rescan** on the Library page.
 - **AcoustID says the key is invalid**: use an application key, not your user key.
 - **Something else**: **Settings** shows the Soulseek connection and sharing, and every download's details include a
   step-by-step log. Over MCP, `get_status` lists recent warnings and errors.

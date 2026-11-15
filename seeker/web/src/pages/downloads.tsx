@@ -172,7 +172,7 @@ export function JobRow({ job, defaultOpen = false }: { job: Job; defaultOpen?: b
               <X className="size-4" />
             </IconButton>
           )}
-          {(job.status === 'failed' || job.status === 'cancelled' || job.status === 'wanted') && (
+          {(job.status === 'failed' || job.status === 'cancelled' || job.status === 'wanted' || (job.status === 'processing' && job.nextRetryAt !== null)) && (
             <IconButton label="Try again" onClick={() => action.mutate({ id: job.id, action: 'retry' })}>
               <RotateCw className="size-4" />
             </IconButton>

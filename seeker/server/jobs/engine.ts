@@ -791,6 +791,7 @@ function finishDownloading(jobId: string) {
 // ---------- processing ----------
 
 let processingRunning = false
+let processingTimer: ReturnType<typeof setTimeout> | undefined
 
 function kickProcessing() {
   void runProcessing()
@@ -801,16 +802,23 @@ async function runProcessing() {
   processingRunning = true
   try {
     for (;;) {
-      const job = get<JobRow>("SELECT * FROM jobs WHERE status = 'processing' ORDER BY updated_at LIMIT 1")
+      const job = get<JobRow>("SELECT * FROM jobs WHERE status = 'processing' AND (next_retry_at IS NULL OR next_retry_at <= ?) ORDER BY updated_at LIMIT 1", [Date.now()])
       if (!job) break
       let failedTracks: number[] = []
+      let waitingForMusic = false
       try {
-        ;({ failedTracks } = await processJob(job.id))
+        ;({ failedTracks, waitingForMusic = false } = await processJob(job.id))
       } catch (error) {
         log.error(`Processing ${job.id} failed`, error)
         store.logJob(job.id, 'error', `Post-processing failed: ${errorMessage(error)}`)
       }
       if (!stillActive(job.id)) continue
+      if (waitingForMusic) {
+        store.patchJob(job.id, { next_retry_at: Date.now() + 10 * 60_000 })
+        store.setPhase(job.id, 'Waiting for the music folder')
+        continue
+      }
+      store.patchJob(job.id, { next_retry_at: null, error: null })
       const runtime = rt(job.id)
       for (const row of store.jobFiles(job.id)) if (row.state === 'failed') runtime.used.add(candidateKey(row))
       if (failedTracks.length && job.kind !== 'files') {
@@ -825,6 +833,12 @@ async function runProcessing() {
     }
   } finally {
     processingRunning = false
+    clearTimeout(processingTimer)
+    const next = get<{ at: number }>("SELECT MIN(next_retry_at) AS at FROM jobs WHERE status = 'processing' AND next_retry_at IS NOT NULL")
+    if (next?.at) {
+      processingTimer = setTimeout(kickProcessing, Math.max(0, next.at - Date.now()))
+      processingTimer.unref()
+    }
   }
 }
 
@@ -1206,6 +1220,12 @@ export async function cancelJob(jobId: string) {
 
 export function retryJob(jobId: string) {
   const job = store.getJob(jobId)
+  if (job?.status === 'processing' && job.next_retry_at !== null) {
+    store.patchJob(jobId, { next_retry_at: null, error: null })
+    store.setPhase(jobId, 'Retrying files already downloaded')
+    kickProcessing()
+    return
+  }
   if (!job || !['wanted', 'failed', 'cancelled'].includes(job.status)) return
   runtimes.delete(jobId)
   if (job.kind === 'import') {
@@ -1249,6 +1269,9 @@ function wishlistTick() {
 export function startEngine() {
   for (const row of all<{ id: string }>("SELECT id FROM jobs WHERE status = 'searching'")) {
     store.patchJob(row.id, { status: 'queued' })
+  }
+  for (const row of all<{ id: string }>("SELECT id FROM jobs WHERE status = 'processing' AND next_retry_at IS NOT NULL")) {
+    store.setPhase(row.id, 'Waiting for the music folder')
   }
   onSoulseekReady(() => kick())
   setInterval(() => void monitorTick(), config.timing.pollMs).unref()

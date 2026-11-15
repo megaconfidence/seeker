@@ -226,7 +226,7 @@ export function toJob(row: JobRow, files = jobFiles(row.id)): Job {
     origin: row.origin,
     attempts: row.attempts,
     error: row.error,
-    phase: phases.get(row.id) ?? null,
+    phase: phases.get(row.id) ?? (row.status === 'processing' && row.next_retry_at !== null ? 'Waiting for the music folder' : null),
     nextRetryAt: row.next_retry_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
