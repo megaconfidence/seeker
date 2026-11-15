@@ -233,6 +233,11 @@ so a scan doesn't crowd out everything else using the share; `SEEKER_SCAN_CONCUR
 file that doesn't answer within a minute is skipped until the next scan. If file after file doesn't answer, Seeker
 stops the scan, says so on the Library page, and tries again in 10 minutes.
 
+Files without tags get their artist, album, title and track number from their folders and file name
+(`Artist/Album (2008)/01 - Title.flac`, an `Artist - Album` folder, or `07 - Artist - Title` in a compilation); tags
+win wherever a file has them. A file whose tags Seeker can't make sense of is still added, with what `ffprobe` reads
+from it or, failing that, its folder and file name. Seeker warns about each one (MCP `get_status` lists them).
+
 **Deletes are permanent.** Seeker has no recycle bin or undo for music files. Deleting a track or album removes its
 audio files, and upgrades permanently replace lower-quality copies after better files are filed. Back up your music
 before deleting or upgrading; the daily database backup does not contain audio.
@@ -347,6 +352,13 @@ and download files Seeker can access; check their permissions before switching.
   **Try again** in Downloads to resume immediately, without downloading again. Cancelling the job explicitly removes
   its downloaded files. "Waiting to try again" works the same way when filing failed for another reason; the
   download's details say why.
+- **A download says "Waiting for slskd to finish moving the file"**: slskd reports a download as finished before it has
+  moved the file out of its incomplete folder. When that folder is on another disk or network share, the move is a
+  copy, which can take minutes. Seeker looks again every 30 seconds for up to an hour (`SEEKER_LOCATE_MS` and
+  `SEEKER_MOVE_WAIT_MS`, in milliseconds), then gets the track from someone else. Moves are instant when slskd's
+  incomplete folder is on the same disk as its downloads folder: see `SLSKD_INCOMPLETE_DIR` in
+  [incomplete and downloads](https://github.com/slskd/slskd/blob/master/docs/config.md#incomplete-and-downloads) in
+  slskd's docs.
 - **The library stopped updating**: Seeker can't see your music, usually because a network share isn't mounted, so
   it keeps the index. It looks again every 10 minutes, or press **Rescan** on the Library page.
 - **A library scan makes the server or the share slow**: set `SEEKER_SCAN_CONCURRENCY` to read fewer files at once

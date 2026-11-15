@@ -27,7 +27,8 @@ seeker/
     jobs/process.ts         After download: verify, MusicBrainz enrichment, tag, move into the library
     jobs/store.ts           Job and file rows, progress
     soulseek/               slskd client, search budget, file parsing, quality, matching, album scoring, queries
-    library/                Library scan, serving, ownership index, delete/upgrade, importer
+    library/                Library scan, tag reading (tags.ts, probe.ts, pathmeta.ts), serving, ownership index,
+                            delete/upgrade, importer
     post/                   verify.ts (length, decode, fake lossless, AcoustID), tag.ts, fsops.ts
     metadata/               Deezer and MusicBrainz clients (rate limited, cached)
     db.ts                   SQLite (node:sqlite) and migrations
@@ -125,6 +126,13 @@ reporting the last commit that built an image.
 - The Soulseek server bans clients for about 30 minutes after roughly 34 searches in 220 seconds. `soulseek/search.ts`
   allows 32 per 220 s, one search at a time, with a gap between them. Don't bypass it.
 - Downloads are enqueued with `POST transfers/downloads/batches` into `seeker/<jobId>` under the downloads folder.
+- slskd reports a transfer `Completed, Succeeded` before it has moved the file out of its incomplete folder. Across
+  file systems that move is a copy, and the file sits at its final name, empty or short, until it's done (70 s for
+  15 MB on the owner's NFS; issue #3). `locateDownload()` never returns a file whose size doesn't match. The job waits
+  instead (`download`, "Waiting for slskd to finish moving the file"), looking again every `SEEKER_LOCATE_MS` without
+  waiting inline, for up to `SEEKER_MOVE_WAIT_MS` (an hour) from when the file row became `downloaded`; then the file
+  fails and another source is found. A file that isn't there at all gets 5 minutes, then fails with the hint about a
+  shared downloads folder. Tracks rejected meanwhile are replaced without waiting (`replaceRejected()`).
 - slskd reports a transfer as in progress while it is still connecting to the user. Only transferred bytes mean it is
   downloading.
 - slskd only knows a download's place in the remote queue when asked:
@@ -200,17 +208,34 @@ reporting the last commit that built an image.
   removals and drops a queued scan. Listings and stats race the stop signal too (`unlessStopped()`). A read that
   doesn't answer within `SEEKER_SCAN_READ_MS` (a minute) is abandoned the same way; its file keeps its row and is read
   next time. Two rounds of reads in a row without an answer stop the scan as if the share were down: the reason goes
-  in `library.problem` and it retries in 10 minutes, instead of giving every remaining file a minute.
+  in `library.problem` and it retries in 10 minutes, instead of giving every remaining file a minute. An abandoned
+  read still holds one of libuv's 16 threads until the kernel lets go, and all file access shares them, so 8 of them
+  (`MAX_STUCK_READS`) stop the scan the same way, whatever `SEEKER_SCAN_CONCURRENCY` says. Shutting down stops a
+  running scan (up to 5 s) so what it read is saved.
+- Deleting a track drops its row and rebuilds its album at once (`forgetTracks()`, through the commit queue). It used
+  to rely on a rescan queued behind the running one, which Stop drops.
 - Scans are slow on network shares because of round trips, not bytes: a 5,000-track NFS library took hours one
   operation at a time. So listings and stats run 16 at a time (`eachLimit()`), and tag reads 12, or 4 when `statfs`
   says the music folder is on a network filesystem (a bind mount reports its source's type), unless
   `SEEKER_SCAN_CONCURRENCY` says otherwise. The image sets `UV_THREADPOOL_SIZE=16`, as file reads use libuv's pool (4
   threads by default). A dozen reads at once kept the owner's NFS server, and everything using it, busy (issue #1).
-  Albums take their cover
-  image from the listing, never a second listing per album. With `duration: false`, music-metadata reads only headers;
-  `skipCovers` keeps FLAC and MP4 covers from being read (MP3s read their whole ID3v2 tag regardless). Don't add
-  `skipPostHeaders`: it drops ID3v1 tags whenever the ID3v2 tag holds anything, even an encoder name, for a 128-byte
-  saving. `test/scan.test.ts` fails if a scan reads more than 256 kB from a FLAC with a 4 MB cover and a 48 MB MP3.
+  Albums take their cover image from the listing, never a second listing per album.
+- Library files are read with `readTags()` in `library/tags.ts`, never `parseFile()`: music-metadata reads a whole
+  ID3v2 tag before parsing it, and the owner's MP3s carry 4 MB of art each (issue #1). For MP3s it walks the ID3v2
+  frames, keeps text frames and UFID, and has music-metadata parse a stand-in tag followed by the audio, so embedded
+  art is never read. ID3v1 and APEv2 at the end of the file are read only when ID3v2 lacks the title, artist, album or
+  track number. A tag whose frames run past its declared size is walked to its real end, and the audio is found by two
+  frame headers in a row (issue #2). Tags it can't walk go to music-metadata whole. Other formats use music-metadata
+  with `skipCovers` and `duration: false`; Ogg and Opus durations come from the last page. Don't use
+  `skipPostHeaders`: it drops ID3v1 tags whenever the ID3v2 tag holds anything, even an encoder name.
+  `test/scan.test.ts` fails if a scan reads more than 256 kB from a FLAC with a 4 MB cover and a 48 MB MP3, and
+  `test/tags.test.ts` if an MP3 with a 4 MB cover costs 64 kB.
+- Tags that can't be parsed don't drop a track: `readTrack()` asks ffprobe (`library/probe.ts`), and failing that
+  names the track after its path. Each one is warned about and the scan's message counts them. Errors reading the
+  file are different (an errno `code`, `AbortError` or `TimeoutError`: `isReadError()`): the file keeps its row.
+  Untagged files are named from their path too (`library/pathmeta.ts`: `Artist/Album (2008)/CD 2/01 - Title`,
+  `Artist - Album` folders, also under `_Unsorted`); a number starting a file name is only the track number when the
+  title came from the file name as well ("10 Years Gone").
 - Embedded art isn't known after a scan: `lib_tracks.has_cover` is `COVER_UNCHECKED` (-1) until `albumCover()` in
   `serve.ts` checks a file, the first time the album is shown, and stores 1 or 0 (0 for the whole album).
 - A full scan lists and reads outside the index lock (`serializeIndex()`); only its commits wait, so post-import
@@ -224,9 +249,10 @@ reporting the last commit that built an image.
 
 - `test/match.test.ts`: matching and scoring.
 - `test/engine.test.ts`: the download engine end to end against the fake slskd and catalog: stalls and switching
-  copies, consistent album quality, fake FLACs, failed and vanished transfers, the wishlist, cancelling, multi-disc
-  albums and imports. Timings are shortened with the `SEEKER_*_MS` variables, and audio fixtures are generated with
-  ffmpeg (seeded noise; the fake FLAC is a real MP3 round trip).
+  copies, consistent album quality, fake FLACs, failed and vanished transfers, downloads slskd is still moving into
+  place (the fake's `slow-move`), the wishlist, cancelling, multi-disc albums and imports. Timings are shortened with
+  the `SEEKER_*_MS` variables, and audio fixtures are generated with ffmpeg (seeded noise; the fake FLAC is a real MP3
+  round trip).
 - `test/mcp.test.ts`: the MCP server through the official client, with no socket. It checks the full tool list,
   progress fields, settings masking and tokens.
 - `test/processing.test.ts`: filing downloads when storage fails: unavailable or read-only music folders, no space
@@ -244,8 +270,15 @@ reporting the last commit that built an image.
 - `test/scan-resume.test.ts`: batches saved while a slowed scan reads, stopping a scan (a first scan too) and picking
   it up again, reads that don't answer within the time limit, a share that stops answering, and
   `SEEKER_SCAN_CONCURRENCY`. Reads are slowed or held per file by patching `FileHandle.read`, told apart by size.
-- `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
-  folder (skipped as root, which can write anywhere).
+- `test/tags.test.ts`: the MP3 tag reader against music-metadata's full parse (ID3v2.2 to 2.4, encodings, frame order,
+  unsynchronisation, extended headers, footers, tags that run past their declared size), bytes read with a 4 MB cover,
+  Ogg and Opus durations, and aborts.
+- `test/probe.test.ts`: ffprobe as a second opinion (a file like issue #2's), its tag names, and a scan that keeps
+  files whose tags can't be parsed. `test/pathmeta.test.ts`: names from folders and file names, and a scan of untagged
+  files next to tagged ones.
+- `test/folders.test.ts`: folder checks (never synchronous), host ids under rootless Docker, and a real startup with a
+  read-only data folder (skipped as root, which can write anywhere). `test/util.test.ts`: `eachLimit` when work
+  throws synchronously.
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.
 - `SEEKER_LOG_LEVEL=info` shows the server log during tests; `SEEKER_TEST_KEEP=1` keeps the temporary folders.
 
