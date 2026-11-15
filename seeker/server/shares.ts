@@ -1,4 +1,5 @@
 import type { ShareRescanStatus } from '../shared/types.ts'
+import { config } from './config.ts'
 import { subscribe } from './events.ts'
 import { statusCounts } from './jobs/store.ts'
 import { logger } from './log.ts'
@@ -17,6 +18,7 @@ const log = logger('shares')
 let timer: ReturnType<typeof setTimeout> | undefined
 let dueAt: number | null = null
 let lastChangeAt = 0
+let libraryRevision = 0
 // The library changed since the last rescan Seeker asked for.
 let unshared = false
 // When the running rescan (Seeker's or slskd's own) was first seen; null when none is running.
@@ -24,7 +26,8 @@ let scanSince: number | null = null
 let waitingForDownloads = false
 let waitingForSlskd = false
 let offNoted = false
-let lastPoll = { reachable: false, scanning: false, at: 0 }
+let lastPoll: { reachable: boolean; scanning: boolean; at: number; sharedFiles: number | null } = { reachable: false, scanning: false, at: 0, sharedFiles: null }
+let initialIndexPending = false
 const listeners = new Set<() => void>()
 
 export function onShareRescanChange(listener: () => void) {
@@ -36,7 +39,7 @@ function changed() {
 }
 
 const automatic = () => getSettings().shares.autoRescan
-const quietMs = () => Math.max(0, getSettings().shares.quietMinutes) * 60_000
+const quietMs = () => Math.max(1, getSettings().shares.quietMinutes) * config.timing.shareMinuteMs
 const clock = (at: number) => new Date(at).toTimeString().slice(0, 5)
 
 function quietPeriod(): string {
@@ -64,6 +67,7 @@ function cancel() {
 // Music was added to or removed from the library, so slskd's shares are out of date.
 export function noteLibraryChange() {
   lastChangeAt = Date.now()
+  libraryRevision++
   unshared = true
   waitingForDownloads = false
   if (!automatic()) {
@@ -80,6 +84,20 @@ export function noteLibraryChange() {
       ? `The library changed again, so the share rescan moves to about ${clock(dueAt!)}`
       : `slskd will be asked to rescan its shares at about ${clock(dueAt!)}, once the library hasn’t changed for ${quietPeriod()}`,
   )
+}
+
+// Initial indexing discovers music already on disk; it doesn't change what slskd shares.
+// If status has not arrived yet, defer the decision instead of guessing that a rescan is needed.
+export function noteInitialLibrary() {
+  if (getSettings().shares.rescanOnFirstScan) return noteLibraryChange()
+  initialIndexPending = true
+  checkInitialLibrary()
+}
+
+function checkInitialLibrary() {
+  if (!initialIndexPending || !lastPoll.reachable || lastPoll.sharedFiles === null) return
+  initialIndexPending = false
+  if (lastPoll.sharedFiles === 0 && !unshared) noteLibraryChange()
 }
 
 async function run() {
@@ -99,13 +117,14 @@ type Outcome = 'started' | 'running' | 'unreachable'
 
 async function start(): Promise<Outcome> {
   const askedAt = Date.now()
-  const looksIdle = lastPoll.reachable && !lastPoll.scanning
-  const covers = lastChangeAt <= askedAt
+  const fresh = askedAt - lastPoll.at < 2 * config.timing.statusMs
+  const looksIdle = lastPoll.reachable && !lastPoll.scanning && fresh
+  const revision = libraryRevision
   // Polls sent before slskd answered may still say it isn't scanning, so the rescan counts from the answer.
   try {
     await slskd.rescanShares()
     scanSince = Date.now()
-    if (covers) unshared = false
+    if (revision === libraryRevision) unshared = false
     log.info('Asked slskd to rescan its shares, so new music is shared')
     return 'started'
   } catch (error) {
@@ -118,7 +137,7 @@ async function start(): Promise<Outcome> {
     if (error instanceof SlskdError && error.timedOut) {
       // slskd stops answering while it scans a big share. If it was idle a moment ago, the scan is ours.
       scanSince = Date.now()
-      if (looksIdle && covers) unshared = false
+      if (looksIdle && revision === libraryRevision) unshared = false
       log.info('slskd didn’t answer in time, probably because it’s busy rescanning; Seeker waits until it answers again')
       return 'running'
     }
@@ -140,10 +159,11 @@ function finish() {
 }
 
 // Every status poll reports what slskd said; `at` is when the poll was sent.
-export function noteSlskdShares(state: { reachable: boolean; scanning: boolean; at: number }) {
+export function noteSlskdShares(state: { reachable: boolean; scanning: boolean; at: number; sharedFiles?: number | null }) {
   const previous = lastPoll
-  lastPoll = state
+  lastPoll = { ...state, sharedFiles: state.sharedFiles ?? null }
   if (!state.reachable) return
+  checkInitialLibrary()
   if (scanSince !== null) {
     // A poll sent before the rescan was asked for says nothing about it.
     if (state.at >= scanSince && !state.scanning) finish()

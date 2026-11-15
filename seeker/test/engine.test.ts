@@ -103,6 +103,7 @@ Object.assign(process.env, {
   SEEKER_SEARCH_IDLE_MS: '1000',
   SEEKER_LOCATE_MS: '2000',
   SEEKER_STATUS_MS: '300',
+  SEEKER_SHARE_MINUTE_MS: '300',
   SEEKER_LOG_LEVEL: process.env.SEEKER_LOG_LEVEL || 'error',
 })
 // AcoustID would call api.acoustid.org; it's off when no key is configured anywhere.
@@ -137,7 +138,7 @@ updateSettings({
   checks: { duration: true, integrity: true, fakeLossless: true, acoustidKey: '' },
   wishlist: { enabled: true },
   // Share rescans wait for the library to be quiet for 300 ms instead of 30 minutes.
-  shares: { autoRescan: true, quietMinutes: 0.005 },
+  shares: { autoRescan: true, quietMinutes: 1 },
 })
 rebuildOwnedIndex()
 startStatus()

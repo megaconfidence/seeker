@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shares: {
     autoRescan: true,
     quietMinutes: 30,
+    rescanOnFirstScan: false,
   },
 }
 
@@ -56,6 +57,7 @@ export function getSettings(): Settings {
       // ignore a corrupt row and fall back to defaults
     }
   }
+  normalizeShares(settings)
   cached = settings
   return settings
 }
@@ -65,6 +67,7 @@ export function updateSettings(patch: Partial<{ [K in Section]: Partial<Settings
   const sections = (Object.keys(patch) as Section[]).filter((section) => section in DEFAULT_SETTINGS)
   for (const section of sections) {
     Object.assign(settings[section], patch[section])
+    if (section === 'shares') normalizeShares(settings)
     exec('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [
       section,
       JSON.stringify(settings[section]),
@@ -73,4 +76,9 @@ export function updateSettings(patch: Partial<{ [K in Section]: Partial<Settings
   cached = settings
   for (const listener of listeners) listener(sections)
   return settings
+}
+
+function normalizeShares(settings: Settings) {
+  // Older databases may contain zero or sub-minute periods that the API used to accept.
+  if (!Number.isFinite(settings.shares.quietMinutes) || settings.shares.quietMinutes < 1) settings.shares.quietMinutes = 1
 }

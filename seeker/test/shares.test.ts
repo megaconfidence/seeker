@@ -28,6 +28,7 @@ Object.assign(process.env, {
   SEEKER_MUSIC_DIR: dirs.music,
   SEEKER_IMPORT_DIR: dirs.import,
   SEEKER_STATUS_MS: '50',
+  SEEKER_SHARE_MINUTE_MS: '300',
   SEEKER_LOG_LEVEL: process.env.SEEKER_LOG_LEVEL || 'error',
 })
 
@@ -35,9 +36,10 @@ const { updateSettings } = await import('../server/settings.ts')
 const shares = await import('../server/shares.ts')
 const store = await import('../server/jobs/store.ts')
 const { startStatus } = await import('../server/status.ts')
+const { slskd: api, SlskdError } = await import('../server/soulseek/slskd.ts')
 
-// 0.005 minutes: rescans wait for 300 ms without library changes.
-updateSettings({ shares: { autoRescan: true, quietMinutes: 0.005 } })
+// Each minute is shortened to 300 ms, without accepting sub-minute settings.
+updateSettings({ shares: { autoRescan: true, quietMinutes: 1 } })
 startStatus()
 
 after(async () => {
@@ -138,4 +140,41 @@ test('manual rescans start at once, even with automatic rescans off', async () =
   } finally {
     updateSettings({ shares: { autoRescan: true } })
   }
+})
+
+for (const fresh of [false, true]) {
+  test(`a timeout with ${fresh ? 'fresh' : 'stale'} idle evidence ${fresh ? 'covers the change' : 'keeps the rescan pending'}`, async (t) => {
+    await quiet()
+    shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() - (fresh ? 0 : 1000) })
+    shares.noteLibraryChange()
+    const before = slskd.shareRescans
+    const request = t.mock.method(api, 'rescanShares', async () => { throw new SlskdError('timed out', 0, true) })
+    try {
+      await shares.rescanSharesNow()
+      assert.equal(shares.shareRescanStatus().pending, !fresh)
+    } finally {
+      request.mock.restore()
+    }
+    shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() + 1 })
+    if (!fresh) {
+      assert.ok(shares.shareRescanStatus().scheduledAt! > Date.now(), 'follow-up must wait, not loop immediately')
+      await waitFor('the follow-up rescan', () => slskd.shareRescans === before + 1)
+    } else {
+      assert.equal(shares.shareRescanStatus().scheduledAt, null)
+    }
+    await quiet()
+  })
+}
+
+test('legacy zero quiet periods are normalized and never schedule an immediate follow-up', async () => {
+  await quiet()
+  const settings = updateSettings({ shares: { quietMinutes: 0 } })
+  assert.equal(settings.shares.quietMinutes, 1)
+  shares.noteLibraryChange()
+  const at = shares.shareRescanStatus().scheduledAt!
+  assert.ok(at >= Date.now() + 200)
+  updateSettings({ shares: { autoRescan: false } })
+  await shares.rescanSharesNow()
+  shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() + 1 })
+  updateSettings({ shares: { autoRescan: true } })
 })

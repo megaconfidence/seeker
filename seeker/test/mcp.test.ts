@@ -159,9 +159,11 @@ test('settings: read with keys masked, change one field, reject bad values', asy
   assert.equal(bad.isError, true)
   assert.match(bad.text, /\{title\}/)
 
-  assert.deepEqual(before.data.shares, { autoRescan: true, quietMinutes: 30 })
+  assert.deepEqual(before.data.shares, { autoRescan: true, quietMinutes: 30, rescanOnFirstScan: false })
   const shares = await call('update_settings', { shares: { autoRescan: false } })
-  assert.deepEqual(shares.data.shares, { autoRescan: false, quietMinutes: 30 })
+  assert.deepEqual(shares.data.shares, { autoRescan: false, quietMinutes: 30, rescanOnFirstScan: false })
+  assert.equal((await call('update_settings', { shares: { quietMinutes: 0 } })).isError, true)
+  assert.equal((await call('update_settings', { shares: { rescanOnFirstScan: true } })).data.shares.rescanOnFirstScan, true)
 })
 
 test('rescan_library says what the scan did, and whether it left the library alone', async () => {

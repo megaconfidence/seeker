@@ -41,6 +41,8 @@ export const config = {
     pollMs: num('SEEKER_POLL_MS', 2000),
     // How often slskd's status (connection, sharing, share scans) is read.
     statusMs: num('SEEKER_STATUS_MS', 10_000),
+    // Shortened by offline tests without allowing unsafe quiet-period settings.
+    shareMinuteMs: num('SEEKER_SHARE_MINUTE_MS', 60_000),
     albumStallMs: num('SEEKER_ALBUM_STALL_MS', 180_000),
     trackQueueMs: num('SEEKER_TRACK_QUEUE_MS', 90_000),
     giveUpMs: num('SEEKER_GIVE_UP_MS', 30 * 60_000),

@@ -435,6 +435,7 @@ export interface Settings {
     autoRescan: boolean
     // How long no new music must arrive (and nothing download) before that rescan.
     quietMinutes: number
+    rescanOnFirstScan: boolean
   }
 }
 

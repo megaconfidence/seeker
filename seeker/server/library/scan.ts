@@ -4,12 +4,12 @@ import path from 'node:path'
 import { parseFile } from 'music-metadata'
 import type { LibraryProblem, LibraryStatus, ScanResult } from '../../shared/types.ts'
 import { config } from '../config.ts'
-import { all, exec, get, transaction } from '../db.ts'
+import { all, exec, get, getMeta, setMeta, transaction } from '../db.ts'
 import { emit } from '../events.ts'
 import { folderMessage, folderProblem, fsReason } from '../folders.ts'
 import { logger } from '../log.ts'
 import { normalize, stripExtras } from '../match/normalize.ts'
-import { noteLibraryChange } from '../shares.ts'
+import { noteInitialLibrary, noteLibraryChange } from '../shares.ts'
 import { errorMessage } from '../util.ts'
 import { rebuildOwnedIndex } from './owned.ts'
 
@@ -361,6 +361,7 @@ async function scan(force: boolean): Promise<ScanResult> {
   const known = new Map(
     all<{ path: string; mtime: number; size: number }>('SELECT path, mtime, size FROM lib_tracks').map((row) => [row.path, row]),
   )
+  const firstScan = known.size === 0 && getMeta('library_indexed') !== '1'
   const files: Entry[] = []
   const unreadable: string[] = []
   const unreadableFiles = new Set<string>()
@@ -408,7 +409,11 @@ async function scan(force: boolean): Promise<ScanResult> {
   })
   await rebuildAlbums()
   rebuildOwnedIndex()
-  if (updated || gone.length) noteLibraryChange()
+  setMeta('library_indexed', '1')
+  if (updated || gone.length) {
+    if (firstScan) noteInitialLibrary()
+    else noteLibraryChange()
+  }
   if (unreadable.length || unreadableFiles.size) {
     const paths = [...unreadable, ...unreadableFiles]
     const shown = paths.slice(0, 3).join(', ') + (paths.length > 3 ? ', …' : '')

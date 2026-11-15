@@ -183,6 +183,11 @@ Everything else is in **Settings** in the app:
 | Wishlist | Keep retrying downloads that can't be found yet | On |
 | Sharing | Ask slskd to rescan its shares once new music has stopped arriving and nothing is downloading | On, after 30 minutes |
 
+The share quiet period must be at least one minute; older zero or sub-minute settings are raised to one minute.
+Use **Rescan shares automatically** to disable automatic scans. Initial indexing normally avoids a rescan of music
+slskd already shares. **Rescan after first library scan** opts into it; if slskd shares nothing, Seeker still schedules
+a rescan after initial indexing.
+
 ## How a download works
 
 1. Seeker looks the album or song up in the catalog to get the exact tracklist.

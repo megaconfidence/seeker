@@ -921,7 +921,7 @@ function buildServer(): McpServer {
     {
       title: 'Change settings',
       description:
-        'Change any settings; only the fields you pass change. quality.formats is the preferred format order. naming.template uses {albumartist} {artist} {album} {year} {track} {disctrack} {title}. shares.autoRescan and shares.quietMinutes control the share rescan Seeker asks slskd for once the library has stopped changing; turn it off for big libraries where rescans make slskd unresponsive.',
+        'Change any settings; only the fields you pass change. quality.formats is the preferred format order. naming.template uses {albumartist} {artist} {album} {year} {track} {disctrack} {title}. shares.autoRescan and shares.quietMinutes (at least 1) control automatic share rescans; shares.rescanOnFirstScan defaults to false because initial indexing usually finds music already shared by slskd.',
       inputSchema: settingsSchema.shape,
     },
     async (patch) =>

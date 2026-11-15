@@ -133,6 +133,8 @@ reporting the last commit that built an image.
   So never ask for a rescan per import: report library changes with `noteLibraryChange()` and let `server/shares.ts`
   ask once the library has been quiet for `shares.quietMinutes` and nothing is downloading. A scan that was already
   running may have missed new music, so it asks again afterwards.
+- Share quiet periods have a one-minute floor, including old saved settings. Initial indexing doesn't change audio
+  files, so it only requests a rescan when `shares.rescanOnFirstScan` is on or slskd reports zero shared files.
 - A search that fails because slskd didn't answer (a `SlskdError` with status 0) sends the download back to the queue
   to wait for slskd, never to the wishlist.
 - A Soulseek account allows one session. Signing in elsewhere logs slskd out.

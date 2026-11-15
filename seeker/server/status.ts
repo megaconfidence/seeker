@@ -74,9 +74,9 @@ async function poll() {
       scanningShares: !!app.shares?.scanning,
     }
     failures = 0
-    noteSlskdShares({ reachable: true, scanning: next.scanningShares, at })
+    noteSlskdShares({ reachable: true, scanning: next.scanningShares, at, sharedFiles: next.sharedFiles })
     // slskd only scans shares at startup; if it shares nothing but the library has music, rescan.
-    if (!checkedShares) {
+    if (!checkedShares && libraryCounts().tracks > 0) {
       checkedShares = true
       if (next.sharedFiles === 0 && !next.scanningShares && libraryCounts().tracks > 0) noteLibraryChange()
     }

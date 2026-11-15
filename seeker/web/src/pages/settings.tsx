@@ -455,6 +455,9 @@ export function SettingsPage() {
             )}
             <Toggle checked={settings.shares.autoRescan} onChange={(value) => save.mutate({ shares: { autoRescan: value } })} label="Rescan shares automatically" />
           </Field>
+          <Field label="Rescan after first library scan" hint="Usually slskd already shares your existing music. Leave this off to avoid an unnecessary scan during initial indexing.">
+            <Toggle checked={settings.shares.rescanOnFirstScan} onChange={(value) => save.mutate({ shares: { rescanOnFirstScan: value } })} label="Rescan after first library scan" />
+          </Field>
           {budget && (
             <Field
               label="Search budget"
