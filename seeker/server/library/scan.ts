@@ -13,6 +13,7 @@ import { normalize, stripExtras } from '../match/normalize.ts'
 import { noteInitialLibrary, noteLibraryChange } from '../shares.ts'
 import { eachLimit, errorMessage } from '../util.ts'
 import { rebuildOwnedIndex } from './owned.ts'
+import { metadataFromPath } from './pathmeta.ts'
 
 const log = logger('library')
 
@@ -205,11 +206,16 @@ async function readTrack(file: string, mtime: number, size: number) {
   const meta = await parseFile(file, { skipCovers: true, duration: false })
   const common = meta.common
   const format = meta.format
-  const dirName = path.basename(path.dirname(file))
-  const title = common.title?.trim() || path.basename(file, path.extname(file))
-  const artist = common.artist?.trim() || common.albumartist?.trim() || 'Unknown Artist'
-  const album = common.album?.trim() || dirName
-  const albumArtist = common.albumartist?.trim() || artist
+  const tagTitle = common.title?.trim()
+  const tagArtist = common.artist?.trim() || common.albumartist?.trim()
+  const tagAlbum = common.album?.trim()
+  // Files without tags (music copied in by hand) are named after their folders and file name.
+  const named = tagTitle && tagArtist && tagAlbum ? null : metadataFromPath(file, config.musicDir)
+  const title = tagTitle || named?.title || path.basename(file, path.extname(file))
+  const artist = tagArtist || named?.artist || 'Unknown Artist'
+  const album = tagAlbum || named?.album || path.basename(path.dirname(file))
+  const albumArtist = common.albumartist?.trim() || (tagArtist ? artist : named?.albumArtist) || artist
+  const tagYear = common.year ?? (common.date ? Number.parseInt(common.date.slice(0, 4), 10) || null : null)
   return {
     path: file,
     album_id: albumIdFor(albumArtist, album),
@@ -219,9 +225,10 @@ async function readTrack(file: string, mtime: number, size: number) {
     artist,
     album,
     album_artist: albumArtist,
-    track_no: common.track?.no ?? null,
-    disc_no: common.disk?.no ?? null,
-    year: common.year ?? (common.date ? Number.parseInt(common.date.slice(0, 4), 10) || null : null),
+    // A number at the start of a file name is only a track number when the title came from it too.
+    track_no: common.track?.no ?? (tagTitle ? null : (named?.track ?? null)),
+    disc_no: common.disk?.no ?? named?.disc ?? null,
+    year: tagYear ?? named?.year ?? null,
     duration: format.duration ?? null,
     codec: format.codec ?? format.container ?? null,
     bitrate: format.bitrate ? Math.round(format.bitrate / 1000) : null,
