@@ -54,6 +54,8 @@ const NETWORK_FILESYSTEMS = new Map<number, string>([
 const BATCH_SIZE = 200
 // The owned index (owned.ts) is rebuilt from every track, so scan batches rebuild it at most this often.
 const OWNED_INDEX_MS = 15_000
+// Reads slower than this are logged; config.timing.scanReadMs gives up on them.
+const SLOW_READ_MS = 10_000
 // lib_tracks.has_cover for embedded art nobody has looked for yet. Scans don't read covers;
 // albumCover() in serve.ts checks the first time an album is shown, and stores 1 or 0.
 export const COVER_UNCHECKED = -1
@@ -316,26 +318,40 @@ async function readTrack(file: string, mtime: number, size: number, io: TagReadO
 
 type TrackRow = Awaited<ReturnType<typeof readTrack>>
 
-// Reads a file's tags, or gives up when `stop` aborts. A read on an unresponsive network share
-// can't be interrupted, so a stopped scan doesn't wait for it. Read errors are thrown.
+const TIMED_OUT = Symbol('timed out')
+
+// Reads a file's tags, or gives up after config.timing.scanReadMs, or when `stop` aborts. A read on
+// an unresponsive network share can't be interrupted, so nothing waits for one given up on; the
+// file is skipped until the next scan. Read errors are thrown.
 async function readWithin(
   entry: Entry,
   options: { stop?: AbortSignal; onBytes?: (bytes: number) => void } = {},
-): Promise<TrackRow | typeof STOPPED> {
+): Promise<TrackRow | typeof TIMED_OUT | typeof STOPPED> {
   const { stop, onBytes } = options
   if (stop?.aborted) return STOPPED
   const read = new AbortController()
+  const limit = config.timing.scanReadMs
+  const timer = setTimeout(() => read.abort(new DOMException(`No answer within ${limit} ms`, 'TimeoutError')), limit)
   const onStop = () => read.abort(new DOMException('The library scan was stopped', 'AbortError'))
   stop?.addEventListener('abort', onStop, { once: true })
+  const started = Date.now()
   try {
-    return await Promise.race([
+    const row = await Promise.race([
       readTrack(entry.file, entry.mtime, entry.size, { signal: read.signal, onBytes }),
       new Promise<never>((_, reject) => read.signal.addEventListener('abort', () => reject(read.signal.reason), { once: true })),
     ])
+    const took = Date.now() - started
+    if (took >= SLOW_READ_MS) log.info(`Reading ${entry.file} took ${Math.round(took / 1000)} s`)
+    return row
   } catch (error) {
-    if (read.signal.aborted) return STOPPED
-    throw error
+    if (!read.signal.aborted) throw error
+    if ((read.signal.reason as Error).name !== 'TimeoutError') return STOPPED
+    log.warn(
+      `Seeker gave up reading ${entry.file} after ${Math.round(limit / 1000)} s and skipped it for now; the next library scan tries again. If this keeps happening, check that file and the share it’s on.`,
+    )
+    return TIMED_OUT
   } finally {
+    clearTimeout(timer)
     stop?.removeEventListener('abort', onStop)
   }
 }
@@ -645,6 +661,18 @@ function stopped(reading?: { read: number; toRead: number; files: number; update
   return result('cancelled', STOPPED_MESSAGE, reading && { files: reading.files, updated: reading.updated })
 }
 
+// A scan that stopped itself because the share stopped answering. Like a stopped scan it keeps what
+// it read; it says why on the Library page, and looks again later.
+function unanswering(inARow: number, reading: { files: number; updated: number }): ScanResult {
+  const message = `${inARow} files in a row didn’t answer within ${Math.round(config.timing.scanReadMs / 1000)} s, so Seeker stopped the library scan. Check that the music folder’s network share is up. Seeker keeps what it read and tries again in 10 minutes.`
+  log.warn(message)
+  problem = { message, missing: 0, canForce: false }
+  pending = null
+  retryTimer = setTimeout(() => void scanLibrary(), RETRY_MS)
+  retryTimer.unref()
+  return result('cancelled', message, { files: reading.files, updated: reading.updated })
+}
+
 // Lets requests waiting on the server run between batches of synchronous database work.
 const breathe = () => new Promise<void>((resolve) => setImmediate(resolve))
 
@@ -771,6 +799,10 @@ async function scanFolder(force: boolean, signal: AbortSignal): Promise<ScanResu
   let updated = 0
   const saved = batches(covers, announce)
   const reads = toRead.length ? await readConcurrency(true) : LOCAL_READS
+  // Two rounds of reads in a row that get no answer mean the share stopped answering, not that the
+  // files are odd. Going on would give each remaining file the whole time limit.
+  let unanswered = 0
+  let shareDown = false
   const onBytes = (bytes: number) => {
     bytesRead += bytes
   }
@@ -782,7 +814,12 @@ async function scanFolder(force: boolean, signal: AbortSignal): Promise<ScanResu
       return null
     })
     if (row === STOPPED) return
-    if (row) {
+    unanswered = row === TIMED_OUT ? unanswered + 1 : 0
+    if (unanswered >= 2 * reads && !shareDown) {
+      shareDown = true
+      stopScan?.abort()
+    }
+    if (row && row !== TIMED_OUT) {
       saved.add(row)
       updated++
     }
@@ -806,7 +843,7 @@ async function scanFolder(force: boolean, signal: AbortSignal): Promise<ScanResu
     // rescans once it's done, as it finds music slskd shares already.
     await saveBatch(rest, covers)
     if (updated && !firstScan) noteLibraryChange()
-    return stopped(reading)
+    return shareDown ? unanswering(unanswered, reading) : stopped(reading)
   }
   await serializeIndex(() => {
     // An import or deletion that changed a path while this scan read files knows better.
@@ -839,7 +876,7 @@ export async function scanFiles(files: string[]): Promise<void> {
     try {
       const stat = await fs.stat(file)
       const row = await readWithin({ file, mtime: Math.floor(stat.mtimeMs), size: stat.size })
-      if (row !== STOPPED) updates.push(row)
+      if (row !== TIMED_OUT && row !== STOPPED) updates.push(row)
     } catch (error) {
       log.warn(`Could not index ${file}`, error)
     }

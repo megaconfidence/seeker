@@ -197,7 +197,10 @@ reporting the last commit that built an image.
   share rescan during a long scan would double the load on the share.
 - `cancelLibraryScan()` (the Stop button, MCP `cancel_library_scan`) starts no more reads, abandons reads in progress
   rather than waiting for them, since a read on a hard NFS mount can't be interrupted, saves what was read, skips
-  removals and drops a queued scan. Listings and stats race the stop signal too (`unlessStopped()`).
+  removals and drops a queued scan. Listings and stats race the stop signal too (`unlessStopped()`). A read that
+  doesn't answer within `SEEKER_SCAN_READ_MS` (a minute) is abandoned the same way; its file keeps its row and is read
+  next time. Two rounds of reads in a row without an answer stop the scan as if the share were down: the reason goes
+  in `library.problem` and it retries in 10 minutes, instead of giving every remaining file a minute.
 - Scans are slow on network shares because of round trips, not bytes: a 5,000-track NFS library took hours one
   operation at a time. So listings and stats run 16 at a time (`eachLimit()`), and tag reads 12, or 4 when `statfs`
   says the music folder is on a network filesystem (a bind mount reports its source's type), unless
@@ -239,8 +242,8 @@ reporting the last commit that built an image.
 - `test/scan.test.ts`: scan speed and its side effects: bytes read (counted through `FileHandle.read`), NAS folders,
   progress, one listing per folder, embedded covers checked on demand, and an import during a slowed-down full scan.
 - `test/scan-resume.test.ts`: batches saved while a slowed scan reads, stopping a scan (a first scan too) and picking
-  it up again, and `SEEKER_SCAN_CONCURRENCY`. Reads are slowed or held per file by patching `FileHandle.read`, told
-  apart by size.
+  it up again, reads that don't answer within the time limit, a share that stops answering, and
+  `SEEKER_SCAN_CONCURRENCY`. Reads are slowed or held per file by patching `FileHandle.read`, told apart by size.
 - `test/folders.test.ts`: folder checks, host ids under rootless Docker, and a real startup with a read-only data
   folder (skipped as root, which can write anywhere).
 - Tests must stay offline: the engine suite fails on any request that isn't to a local fake.

@@ -1,6 +1,6 @@
 // Long library scans: what they read is saved in batches as they go, a stopped scan (a first scan
-// too) keeps it and the next one picks up from there, and SEEKER_SCAN_CONCURRENCY sets how many
-// files are read at once.
+// too) keeps it and the next one picks up from there, files that don't answer are skipped after a
+// time limit, and SEEKER_SCAN_CONCURRENCY sets how many files are read at once.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { rmSync } from 'node:fs'
@@ -31,8 +31,10 @@ const sizes = { slow: (await fs.stat(slow)).size, stuck: (await fs.stat(stuck)).
 Object.assign(process.env, {
   SEEKER_DATA_DIR: dirs.data, SEEKER_MUSIC_DIR: dirs.music, SEEKER_DOWNLOADS_DIR: dirs.downloads, SEEKER_IMPORT_DIR: dirs.import,
   SLSKD_URL: 'http://127.0.0.1:9', SLSKD_API_KEY: 'seeker-test-key', SEEKER_LOG_LEVEL: process.env.SEEKER_LOG_LEVEL || 'error',
-  // A batch at least every 150 ms instead of 15 s, and three files read at once.
+  // A batch at least every 150 ms instead of 15 s, 1.5 s per file instead of a minute, and three
+  // files read at once.
   SEEKER_SCAN_BATCH_MS: '150',
+  SEEKER_SCAN_READ_MS: '1500',
   SEEKER_SCAN_CONCURRENCY: '3',
 })
 const { parseScanConcurrency } = await import('../server/config.ts')
@@ -41,6 +43,7 @@ const { updateSettings } = await import('../server/settings.ts')
 updateSettings({ shares: { autoRescan: false } })
 const { cancelLibraryScan, libraryCounts, libraryStatus, networkFilesystem, scanLibrary } = await import('../server/library/scan.ts')
 const { listAlbums } = await import('../server/library/serve.ts')
+const { recentProblems } = await import('../server/log.ts')
 const shares = await import('../server/shares.ts')
 const { subscribe } = await import('../server/events.ts')
 
@@ -224,6 +227,63 @@ test('a first scan cut off after its last batch still finishes as the first scan
   assert.equal(getMeta('library_indexed'), '1')
   assert.equal(sharesTold(), true, 'the end of the first scan was announced')
   updateSettings({ shares: { rescanOnFirstScan: false } })
+})
+
+test('a file that doesn’t answer is skipped after the time limit, and keeps its row', async () => {
+  await reset()
+  const known = await put('Stuck/Album/01 - Known.mp3', stuck)
+  assert.equal((await scanLibrary()).updated, 1)
+  const before = row(known)
+  assert.equal(before?.title, 'Stuck')
+  // It changes and stops answering; so does a new file next to it, while a third answers.
+  const later = new Date(Date.now() + 60_000)
+  await fs.utimes(known, later, later)
+  const added = await put('Stuck/Album/02 - Added.mp3', stuck)
+  const answering = await put('Quick/Album/01 - Quick.mp3', quick)
+  const answer = holdStuckFiles()
+  try {
+    const startedAt = Date.now()
+    const scan = await scanLibrary()
+    assert.equal(scan.outcome, 'done', scan.message)
+    assert.ok(Date.now() - startedAt < 8000, 'the scan waited for files that never answered')
+    assert.equal(scan.updated, 1)
+    assert.ok(row(answering))
+    assert.deepEqual(row(known), before, 'the file that didn’t answer keeps its row as it was')
+    assert.equal(row(added), undefined, 'a new file that didn’t answer isn’t indexed yet')
+    for (const file of [known, added]) {
+      assert.ok(recentProblems(50).some((problem) => problem.message.includes(file) && problem.message.includes('gave up')), `${file} was logged`)
+    }
+  } finally {
+    answer()
+  }
+  // Once they answer, the next scan reads them.
+  assert.equal((await scanLibrary()).updated, 2)
+  assert.notDeepEqual(row(known), before)
+  assert.ok(row(added))
+})
+
+test('a scan stops by itself when file after file doesn’t answer, keeps what it read, and says why', async () => {
+  await reset()
+  const answering = await put('A Quick/Album/01 - Quick.mp3', quick)
+  for (let i = 1; i <= 9; i++) await put(`Z Stuck/Album/${pad(i)} - Stuck.mp3`, stuck)
+  const answer = holdStuckFiles()
+  try {
+    // Two rounds of three reads at a time go unanswered, then it stops instead of trying the rest.
+    const scan = await scanLibrary()
+    assert.equal(scan.outcome, 'cancelled')
+    assert.match(scan.message, /^6 files in a row didn’t answer within 2 s, so Seeker stopped the library scan\. Check that the music folder’s network share is up\./)
+    assert.equal(libraryStatus().problem?.message, scan.message, 'the Library page says why')
+    assert.equal(libraryStatus().problem?.canForce, false)
+    assert.ok(row(answering), 'what it read is kept')
+    assert.equal(getMeta('library_indexed'), '0')
+    assert.ok(recentProblems(50).filter((problem) => problem.message.includes('gave up reading')).length >= 6)
+  } finally {
+    answer()
+  }
+  const done = await scanLibrary()
+  assert.equal(done.outcome, 'done')
+  assert.equal(libraryStatus().problem, null)
+  assert.equal(libraryCounts().tracks, 10)
 })
 
 test('stopping a scan abandons reads that don’t answer, and drops the scan queued after it', async () => {

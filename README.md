@@ -229,7 +229,9 @@ skipped. Cover art embedded in the files isn't read during a scan; Seeker looks 
 a cover image in its folder is shown. Music that finishes downloading during a scan is added straight away.
 
 On a network share (NFS, SMB, or a FUSE mount such as sshfs or rclone), Seeker reads 4 files at a time instead of 12,
-so a scan doesn't crowd out everything else using the share; `SEEKER_SCAN_CONCURRENCY` sets the number yourself.
+so a scan doesn't crowd out everything else using the share; `SEEKER_SCAN_CONCURRENCY` sets the number yourself. A
+file that doesn't answer within a minute is skipped until the next scan. If file after file doesn't answer, Seeker
+stops the scan, says so on the Library page, and tries again in 10 minutes.
 
 **Deletes are permanent.** Seeker has no recycle bin or undo for music files. Deleting a track or album removes its
 audio files, and upgrades permanently replace lower-quality copies after better files are filed. Back up your music

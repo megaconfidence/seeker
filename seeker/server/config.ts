@@ -62,5 +62,7 @@ export const config = {
     moveWaitMs: num('SEEKER_MOVE_WAIT_MS', 60 * 60_000),
     // A full library scan saves what it has read at least this often, and every 200 tracks.
     scanBatchMs: num('SEEKER_SCAN_BATCH_MS', 15_000),
+    // How long a scan waits for one file's tags before it skips the file until the next scan.
+    scanReadMs: num('SEEKER_SCAN_READ_MS', 60_000),
   },
 }
