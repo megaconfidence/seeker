@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { parseFile } from 'music-metadata'
 import type { ImportCandidate, ImportChoice, ImportFolder, Job, JobTarget } from '../../shared/types.ts'
 import { buildAlbumTarget, buildMbTarget } from '../catalog.ts'
 import { config } from '../config.ts'
@@ -14,6 +13,7 @@ import { assignTracks, type Folder } from '../soulseek/album.ts'
 import { toCandidate, type Candidate } from '../soulseek/files.ts'
 import { TtlCache } from '../util.ts'
 import { AUDIO_EXTENSIONS } from './scan.ts'
+import { readTags } from './tags.ts'
 
 interface LocalFile {
   path: string
@@ -74,7 +74,8 @@ async function readFile(entry: { path: string; size: number; mtime: number }): P
     format: path.extname(entry.path).slice(1).toUpperCase(),
   }
   try {
-    const meta = await parseFile(entry.path, { skipCovers: true })
+    // Like library scans, without reading embedded art: import folders are often network shares too.
+    const meta = await readTags(entry.path)
     const common = meta.common
     const discFromDir = path.basename(path.dirname(entry.path)).match(/(\d{1,2})\s*$/)
     file = {
