@@ -13,7 +13,6 @@ library, ready for Jellyfin or any other player. An AI assistant can do all of t
 ## Contents
 
 - [Features](#features)
-- [What Seeker is not](#what-seeker-is-not)
 - [Screenshots](#screenshots)
 - [Install](#install)
   - [Set up slskd](#set-up-slskd)
@@ -48,12 +47,6 @@ library, ready for Jellyfin or any other player. An AI assistant can do all of t
 - **Import.** Add music you already have: Seeker matches each folder to an album, tags it and files it.
 - **Shares back.** When slskd shares your music folder, new music is shared on Soulseek automatically.
 - **MCP server.** Everything in the app can be done and read by an AI assistant.
-
-## What Seeker is not
-
-Seeker is a focused Soulseek downloader, not a full SoulSync replacement or a media server. It has no playlists,
-discovery feed, multi-user profiles, video, podcasts, torrent/Usenet downloads or Lidarr integration. Music downloads
-come from Soulseek through slskd, not Spotify or Tidal; Deezer and MusicBrainz supply metadata.
 
 ## Screenshots
 

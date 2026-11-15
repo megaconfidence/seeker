@@ -15,10 +15,8 @@ test('MIT terms are identical in the repository and the Docker build context', a
   assert.equal(JSON.parse(await fs.readFile(path.join(app, 'package-lock.json'), 'utf8')).packages[''].license, 'MIT')
 })
 
-test('scope and permanent deletion limitations are documented', async () => {
+test('permanent deletion is documented', async () => {
   const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8')
-  assert.match(readme, /## What Seeker is not/)
   assert.match(readme, /no recycle bin or undo/)
   assert.match(readme, /database backup does not contain audio/)
-  for (const feature of ['playlists', 'multi-user', 'podcasts', 'Spotify', 'Tidal', 'Lidarr']) assert.ok(readme.includes(feature))
 })
