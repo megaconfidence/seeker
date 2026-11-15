@@ -14,6 +14,7 @@ import { startLibraryScanner } from './library/scan.ts'
 import { logger } from './log.ts'
 import { handleMcp } from './mcp.ts'
 import { apiRoutes } from './routes.ts'
+import { startShares } from './shares.ts'
 import { startStatus } from './status.ts'
 import { startWatchlist } from './watchlist.ts'
 
@@ -63,6 +64,7 @@ checkFolders()
 announcePassword()
 removeCliToken()
 rebuildOwnedIndex()
+startShares()
 startStatus()
 startLibraryScanner()
 startEngine()

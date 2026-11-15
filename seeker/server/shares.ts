@@ -1,5 +1,6 @@
 import type { ShareRescanStatus } from '../shared/types.ts'
 import { config } from './config.ts'
+import { getMeta, setMeta } from './db.ts'
 import { subscribe } from './events.ts'
 import { statusCounts } from './jobs/store.ts'
 import { logger } from './log.ts'
@@ -64,11 +65,33 @@ function cancel() {
   waitingForDownloads = false
 }
 
+// Saved, so a restart (every update is one) during the quiet period doesn't drop the rescan, which
+// would leave new music unshared until the library next changes.
+function setUnshared(value: boolean) {
+  unshared = value
+  try {
+    setMeta('shares_pending', value ? '1' : '0')
+  } catch (error) {
+    log.warn('Could not save whether slskd’s shares need a rescan', error)
+  }
+}
+
+// At startup: a rescan that was still to come when Seeker stopped.
+export function startShares() {
+  if (getMeta('shares_pending') !== '1') return
+  unshared = true
+  lastChangeAt = Date.now()
+  libraryRevision++
+  if (!automatic()) return changed()
+  schedule(lastChangeAt + quietMs())
+  log.info(`The library changed before Seeker restarted, so slskd will be asked to rescan its shares at about ${clock(dueAt!)}`)
+}
+
 // Music was added to or removed from the library, so slskd's shares are out of date.
 export function noteLibraryChange() {
   lastChangeAt = Date.now()
   libraryRevision++
-  unshared = true
+  setUnshared(true)
   waitingForDownloads = false
   if (!automatic()) {
     if (!offNoted) log.info('Automatic share rescans are off, so new music is shared after slskd’s next rescan')
@@ -134,7 +157,7 @@ async function start(): Promise<Outcome> {
   try {
     await slskd.rescanShares()
     scanSince = Date.now()
-    if (revision === libraryRevision) unshared = false
+    if (revision === libraryRevision) setUnshared(false)
     log.info('Asked slskd to rescan its shares, so new music is shared')
     return 'started'
   } catch (error) {
@@ -147,7 +170,7 @@ async function start(): Promise<Outcome> {
     if (error instanceof SlskdError && error.timedOut) {
       // slskd stops answering while it scans a big share. If it was idle a moment ago, the scan is ours.
       scanSince = Date.now()
-      if (looksIdle && revision === libraryRevision) unshared = false
+      if (looksIdle && revision === libraryRevision) setUnshared(false)
       log.info('slskd didn’t answer in time, probably because it’s busy rescanning; Seeker waits until it answers again')
       return 'running'
     }
@@ -183,7 +206,7 @@ export function noteSlskdShares(state: { reachable: boolean; scanning: boolean; 
     // slskd started a rescan itself, on a schedule or from its own interface. If it wasn't scanning
     // at the previous poll, after the last change, this rescan includes everything new.
     scanSince = state.at
-    if (previous.reachable && !previous.scanning && previous.at >= lastChangeAt) unshared = false
+    if (previous.reachable && !previous.scanning && previous.at >= lastChangeAt) setUnshared(false)
     return changed()
   }
   if (waitingForSlskd) {

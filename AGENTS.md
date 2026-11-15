@@ -132,7 +132,9 @@ reporting the last commit that built an image.
   especially a network share, a scan can keep slskd from answering for minutes (a 5,000-file NFS library took 7–9).
   So never ask for a rescan per import: report library changes with `noteLibraryChange()` and let `server/shares.ts`
   ask once the library has been quiet for `shares.quietMinutes` and nothing is downloading. A scan that was already
-  running may have missed new music, so it asks again afterwards.
+  running may have missed new music, so it asks again afterwards. Whether a rescan is pending is saved in `meta`
+  (`shares_pending`, via `setUnshared()`), and `startShares()` plans it again after a restart: every deploy restarts
+  the owner's server, and the in-memory flag alone left music downloaded in the 30 minutes before unshared.
 - Share quiet periods stay within 1–1440 minutes, including old or hand-edited saved settings: outside that, a timer
   fires at once (a `setTimeout` beyond about 24.8 days overflows to 1 ms). Initial indexing doesn't change audio files,
   so it only requests a rescan when `shares.rescanOnFirstScan` is on or slskd reports zero shared files.

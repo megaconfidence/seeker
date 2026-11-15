@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { after, test } from 'node:test'
+import { pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { FakeSlskd } from './fakes/slskd.ts'
 
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'seeker-share-startup-'))
@@ -33,6 +36,14 @@ async function reset() {
   await fs.rm(music, { recursive: true })
   await fs.mkdir(music)
   updateSettings({ shares: { autoRescan: true, rescanOnFirstScan: false } })
+}
+
+// What a freshly started Seeker would do about share rescans, against the same database.
+async function afterRestart(): Promise<{ pending: boolean; scheduledAt: number | null }> {
+  const module = pathToFileURL(path.join(import.meta.dirname, '../server/shares.ts')).href
+  const script = `const shares = await import(${JSON.stringify(module)}); shares.startShares(); console.log(JSON.stringify(shares.shareRescanStatus())); process.exit(0)`
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], { env: process.env })
+  return JSON.parse(stdout.trim().split('\n').at(-1)!)
 }
 
 test('old share settings load with safe defaults and no database migration', () => {
@@ -108,4 +119,16 @@ test('new files after a genuinely empty first scan still schedule a rescan', asy
   await fs.writeFile(path.join(music, 'new.mp3'), '')
   await scanLibrary()
   assert.ok(shares.shareRescanStatus().scheduledAt)
+})
+
+test('a share rescan that was still to come survives a restart; one that happened doesn’t come back', async () => {
+  await reset()
+  shares.noteLibraryChange()
+  const pending = await afterRestart()
+  assert.equal(pending.pending, true)
+  assert.ok(pending.scheduledAt, 'the restarted Seeker plans the rescan again')
+  await shares.rescanSharesNow()
+  shares.noteSlskdShares({ reachable: true, scanning: false, at: Date.now() + 1 })
+  const done = await afterRestart()
+  assert.deepEqual([done.pending, done.scheduledAt], [false, null])
 })
