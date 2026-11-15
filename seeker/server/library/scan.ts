@@ -13,7 +13,9 @@ import { normalize, stripExtras } from '../match/normalize.ts'
 import { noteInitialLibrary, noteLibraryChange } from '../shares.ts'
 import { eachLimit, errorMessage } from '../util.ts'
 import { rebuildOwnedIndex } from './owned.ts'
+import type { IAudioMetadata } from 'music-metadata'
 import { metadataFromPath } from './pathmeta.ts'
+import { isReadError, probeTags } from './probe.ts'
 import { readTags } from './tags.ts'
 import type { TagReadOptions } from './tags.ts'
 
@@ -56,6 +58,7 @@ const BATCH_SIZE = 200
 const OWNED_INDEX_MS = 15_000
 // Reads slower than this are logged; config.timing.scanReadMs gives up on them.
 const SLOW_READ_MS = 10_000
+const LOSSLESS_EXTENSIONS = new Set(['flac', 'wav', 'aiff', 'aif', 'wv', 'ape', 'alac'])
 // lib_tracks.has_cover for embedded art nobody has looked for yet. Scans don't read covers;
 // albumCover() in serve.ts checks the first time an album is shown, and stores 1 or 0.
 export const COVER_UNCHECKED = -1
@@ -82,6 +85,8 @@ let rateFrom = { at: 0, read: 0 }
 // Paths that imports and deletions changed while a full scan was reading files: what the scan read
 // for them is older, so it leaves them alone.
 let changedDuringScan: Set<string> | null = null
+// Files whose tags couldn't be parsed since the running scan started (readTrack).
+let unparsed: string[] = []
 
 // Commits to the index (full scans and post-import indexing) must not prepare album snapshots over
 // one another. Only commits wait here: a full scan lists and reads files first, without waiting.
@@ -273,9 +278,34 @@ function first(value: string | string[] | undefined): string | undefined {
   return value
 }
 
+// What's known of a file nobody could parse: the format its extension says.
+function untagged(file: string): IAudioMetadata {
+  const ext = path.extname(file).slice(1).toLowerCase()
+  return {
+    common: { track: { no: null, of: null }, disk: { no: null, of: null }, movementIndex: { no: null, of: null } },
+    format: { trackInfo: [], tagTypes: [], codec: ext.toUpperCase() || undefined, lossless: LOSSLESS_EXTENSIONS.has(ext) },
+    native: {},
+    quality: { warnings: [] },
+  }
+}
+
 // Tags and stream details, without reading cover images or the audio: see readTags() in tags.ts.
+// Tags music-metadata can't parse (issue #2: a tag whose header understates its size) get a second
+// opinion from ffprobe, and failing that the file is named after its path, so the track isn't
+// dropped. A file that can't be read at all throws, and keeps whatever the index has.
 async function readTrack(file: string, mtime: number, size: number, io: TagReadOptions = {}) {
-  const meta = await readTags(file, io)
+  let meta: IAudioMetadata
+  try {
+    meta = await readTags(file, io)
+  } catch (error) {
+    if (isReadError(error)) throw error
+    const probed = await probeTags(file, io.signal)
+    meta = probed ?? untagged(file)
+    unparsed.push(file)
+    log.warn(
+      `Seeker couldn’t read the tags in ${file} (${errorMessage(error)}), so it ${probed ? 'used what ffprobe read from the file' : 'named the track after its folder and file name'}.`,
+    )
+  }
   const common = meta.common
   const format = meta.format
   const tagTitle = common.title?.trim()
@@ -638,6 +668,7 @@ function refuse(message: string, missing: number, canForce: boolean, retry: bool
 async function scan(force: boolean, signal: AbortSignal): Promise<ScanResult> {
   progress = { phase: 'listing', found: 0, read: 0, toRead: 0, current: null }
   bytesRead = 0
+  unparsed = []
   changedDuringScan = new Set()
   progressLog = setInterval(logProgress, PROGRESS_LOG_MS)
   progressLog.unref()
@@ -862,7 +893,9 @@ async function scanFolder(force: boolean, signal: AbortSignal): Promise<ScanResu
     log.warn(`Seeker couldn’t read ${paths.length} folders or files in the music folder, so it kept their tracks: ${shown}. Check the mount and permissions.`)
   }
   problem = null
-  const message = `Library scan: ${files.length} files, ${updated} updated, ${gone.length} removed${force ? ' (forced)' : ''} in ${Date.now() - started} ms`
+  // Each of these was warned about by name; the count shows they're in the library anyway.
+  const odd = unparsed.length ? `, ${unparsed.length} with tags Seeker couldn’t read (named by ffprobe or their paths)` : ''
+  const message = `Library scan: ${files.length} files, ${updated} updated, ${gone.length} removed${odd}${force ? ' (forced)' : ''} in ${Date.now() - started} ms`
   log.info(message)
   return result('done', message, { files: files.length, updated, removed: gone.length })
 }
